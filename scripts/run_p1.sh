@@ -1,4 +1,4 @@
-export MASTER_ADDR='172.26.111.174'
+export MASTER_ADDR='172.19.136.149'
 export MASTER_PORT=8092
 export WORLD_SIZE=3
 export RANK=1

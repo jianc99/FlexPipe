@@ -4,4 +4,4 @@ export WORLD_SIZE=3
 export RANK=2
 export NCCL_P2P_DISABLE=1
 
-CUDA_VISIBLE_DEVICES=0 python3 cross_node_test.py
+CUDA_VISIBLE_DEVICES=2 python3 cross_node_test.py

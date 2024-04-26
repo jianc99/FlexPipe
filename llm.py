@@ -7,7 +7,6 @@ import torch.nn.functional as F
 from torch import nn
 from typing import List, Optional, Tuple, Union
 import gc
-from flash_attn import flash_attn_with_kvcache
 import torch.distributed as dist
 def _make_causal_mask(
     input_ids_shape: torch.Size, dtype: torch.dtype, device: torch.device

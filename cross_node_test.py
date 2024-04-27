@@ -8,18 +8,15 @@ import os
 import torch.distributed as dist
 
 
-# gpu_id = int(os.environ["LOCAL_RANK"])
-# global_rank = int(os.environ["RANK"])
+rank = int(os.environ["RANK"])
+world_size= int(os.environ["WORLD_SIZE"])
 
-
-# print(gpu_id,global_rank)
-# print(os.environ)
 def forward(input):
     local_rank=dist.get_rank()
     return input*local_rank
 
-dist.init_process_group(backend='nccl')
-dist.barrier()
+dist.init_process_group(backend='nccl',init_method='tcp://172.19.136.149:8092',world_size=world_size,rank=rank)
+# dist.barrier()
 
 group1=dist.new_group([0,1])
 group2=dist.new_group([2])
@@ -36,21 +33,24 @@ DEVICE=torch.device("cuda", 0)
 input=torch.tensor([10],device=DEVICE)
 output=torch.tensor([0],device=DEVICE)
 hidden=torch.tensor([0],device=DEVICE)
-print(input)
+# input=torch.tensor([10])
+# output=torch.tensor([0])
+# hidden=torch.tensor([0])
 
 if local_rank in [0,1]:
-    hidden=forward(hidden)
-    print(hidden)
+    hidden=forward(input)
+    print(hidden,local_rank)
     dist.all_reduce(hidden,group=group1)
-    print(hidden)
+    print(hidden,local_rank)
     if local_rank == 0:
         dist.send(hidden,2)
     dist.broadcast(output,2)
 
 if local_rank in [2]:
     dist.recv(hidden,0)
-    hidden=forward(input)
-    print(hidden)
+    print(hidden,local_rank)
+    hidden=forward(hidden)
+    print(hidden,local_rank)
     output=hidden
     dist.broadcast(output,2)
-print(output)
+print(output,local_rank)

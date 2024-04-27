@@ -11,6 +11,18 @@ pip install torch==2.1.1 torchvision==0.16.1 torchaudio==2.1.1 --index-url https
 pip install transformers==4.36.2
 ```
 
+## Run Scripts
+Need to specify the master address and port, and NCCL_SOCKET_IFNAME to specific network interfance.
+``` bash
+export MASTER_ADDR='172.24.46.47'
+export MASTER_PORT=9991
+export WORLD_SIZE=3
+export RANK=0
+export NCCL_SOCKET_IFNAME=eno1
+CUDA_VISIBLE_DEVICES=1 python3 cross_node_test.py
+```
+
+
 ## Performance on A100 80G PCIE
 Unit in ms, Prefix = 512, Batch size = 1
 | Model / # GPUs | 1 | 2 | 4 | 8 |

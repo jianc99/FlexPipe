@@ -14,7 +14,8 @@ def forward(input):
     local_rank=dist.get_rank()+1
     return input*local_rank
 
-dist.init_process_group(backend='nccl',init_method='tcp://172.24.46.47:9991',world_size=world_size,rank=rank)
+# dist.init_process_group(backend='nccl',init_method='tcp://172.24.46.47:9991',world_size=world_size,rank=rank)
+dist.init_process_group(backend='nccl')
 dist.barrier()
 
 group1=dist.new_group([0])

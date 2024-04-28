@@ -6,7 +6,7 @@
 
 export MASTER_ADDR='172.24.46.47'
 export MASTER_PORT=9991
-export WORLD_SIZE=3
+export WORLD_SIZE=2
 export RANK=1
 export NCCL_SOCKET_IFNAME=eno1
 

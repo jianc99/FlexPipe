@@ -51,6 +51,8 @@ Unit in ms, Prefix = 512, Batch size = 1
 | Llama-2-7b  | 22.1  | 14.4  | 9.0  | 7.0  |
 <!-- | Llama-2-70b | x  |  x | x  | x  | -->
 
+PP+TP Degree= 4 4 means the first and second pipeline stages are both doing tensor parallelism with degree=4.
+
 | PP+TP Degree | 2 2 | 4 4 | 2 2 2 |
 |---|---|---|---|---|
 | Llama-2-7b  | 19.2  | 13.4  | 17.0 |

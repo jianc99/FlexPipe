@@ -5,7 +5,7 @@
 conda create -n flexspec python=3.11
 ```
 
-### Install Necessary Package
+### Install Necessary Packages
 Must ensure NCCL version to be the same across different nodes.
 
 ``` bash

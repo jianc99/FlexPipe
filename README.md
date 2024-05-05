@@ -6,7 +6,7 @@ conda create -n flexspec python=3.11
 ```
 
 ### Install Necessary Packages
-Must ensure NCCL version to be the same across different nodes.
+Must ensure NCCL version to be the same across different nodes. In our experiments, NCCL version=2.18.6.
 
 ``` bash
 pip install torch==2.1.1 torchvision==0.16.1 torchaudio==2.1.1 --index-url https://download.pytorch.org/whl/cu118

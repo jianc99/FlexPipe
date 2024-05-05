@@ -34,19 +34,22 @@ class LLM_Pipeline:
         if self.num_stages == 1:
             return self.pp_engine.inference(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask, storage_ids=storage_ids)
 
-        input_ids=input_ids
         hidden_state = torch.full((self.bsz, input_ids.size(1), self.hidden_dim), 0, dtype=self.dtype, device=input_ids.device)
         output = torch.full((self.bsz, input_ids.size(1), 32000), 0, dtype=torch.float32, device=input_ids.device)
 
         if self.is_first_stage:
+            dist.broadcast(input_ids, self.group_indices[self.current_stage][0], self.process_group)
             hidden_state=self.pp_engine.inference(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask, storage_ids=storage_ids)
             if self.local_rank == 0:
                 dist.send(hidden_state, self.group_indices[self.current_stage+1][0])
+                dist.recv(output, self.group_indices[-1][0])
         elif self.is_last_stage:
             if self.local_rank == 0:
                 dist.recv(hidden_state,self.group_indices[self.current_stage-1][0])
             dist.broadcast(hidden_state, self.group_indices[self.current_stage][0], self.process_group)
             output=self.pp_engine.inference(input_ids=hidden_state, position_ids=position_ids, attention_mask=attention_mask, storage_ids=storage_ids)
+            if self.local_rank == 0:
+                dist.send(output,0)
         else:
             if self.local_rank == 0:
                 dist.recv(hidden_state,self.group_indices[self.current_stage-1][0])
@@ -54,6 +57,6 @@ class LLM_Pipeline:
             hidden_state=self.pp_engine.inference(input_ids=hidden_state, position_ids=position_ids, attention_mask=attention_mask, storage_ids=storage_ids)
             if self.local_rank == 0:
                 dist.send(hidden_state,self.group_indices[self.current_stage+1][0])
-        dist.broadcast(output,self.group_indices[-1][0])
+        # dist.broadcast(output,self.group_indices[-1][0])
         return output
 

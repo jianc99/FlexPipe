@@ -3,6 +3,7 @@
 ### Create Virtual Environment
 ``` bash
 conda create -n flexspec python=3.11
+conda activate flexspec
 ```
 
 ### Install Necessary Packages

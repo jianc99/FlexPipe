@@ -15,12 +15,14 @@ pp_config=initialized_dist(args.tp_groups,args.layer_partition)
 print(args)
 print("="*80)
 print(pp_config)
+global_rank=dist.get_rank()
 
 MAX_LEN = args.M
 DEC_LEN = args.D
 MODEL_NAME = args.model
 DTYPE = torch.float16
-DEVICE = torch.device("cuda", 0)
+# DEVICE = torch.device("cuda", 0)
+DEVICE = torch.device("cuda", global_rank)
 PREFIX_LEN=128
 T = args.T
 WARM_UP = 10

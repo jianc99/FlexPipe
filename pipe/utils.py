@@ -90,7 +90,8 @@ def initialized_dist(tp_groups,layer_partition):
         'current_layers':current_stage_layers,
     }
     dist.barrier()
-    torch.cuda.set_device(0)
+    # torch.cuda.set_device(0)
+    torch.cuda.set_device(global_rank)
     return pp_config
 
 if __name__ == "__main__":

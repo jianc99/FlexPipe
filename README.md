@@ -32,7 +32,7 @@ Unit in ms, Prefix = 512, Batch size = 1
 | Model / # GPUs | 1 | 2 | 4 | 8 |
 |---|---|---|---|---|
 | Sheared-LLaMA-2.7B  |  7.9 |   |   |  |
-| Llama-2-7b  | 12.7  | 10.2  |   |   |
+| Llama-2-7b  | 12.7  | 10.2  | 8.2  |   |
 | Llama-2-13b  | 21.6 |   |   |   |
 | Llama-2-70b | x  |   |   |   |
 | vicuna-33b-v1.3 | 49.0  |   |   |   |

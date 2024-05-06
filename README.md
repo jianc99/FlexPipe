@@ -37,6 +37,12 @@ Unit in ms, Prefix = 512, Batch size = 1
 | Llama-2-70b | x  |   |   |   |
 | vicuna-33b-v1.3 | 49.0  |   |   |   |
 
+## Performance on H100 80G PCIE
+Unit in ms, Prefix = 512, Batch size = 1
+| Model / # GPUs | 1 | 2 | 4 | 8 |
+|---|---|---|---|---|
+| Llama-2-7b  | 12.7  | 9.0  | 7.3  |   |
+
 ## Performance on 4090 24G PCIE
 Unit in ms, Prefix = 512, Batch size = 1
 | Model / # GPUs | 1 | 2 | 4 | 8 |

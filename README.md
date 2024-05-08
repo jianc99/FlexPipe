@@ -12,6 +12,8 @@ Must ensure NCCL version to be the same across different nodes. In our experimen
 ``` bash
 pip install torch==2.1.1 torchvision==0.16.1 torchaudio==2.1.1 --index-url https://download.pytorch.org/whl/cu118
 pip install transformers==4.36.2
+pip install protobuf
+pip install sentencepiece
 ```
 
 ## Run Scripts
@@ -41,7 +43,7 @@ Unit in ms, Prefix = 512, Batch size = 1
 Unit in ms, Prefix = 512, Batch size = 1
 | Model / # GPUs | 1 | 2 | 4 | 8 |
 |---|---|---|---|---|
-| Llama-2-7b  | 12.7  | 9.0  | 7.3  |   |
+| Llama-2-7b  | 12.7  | 9.0  | 7.2  |   |
 
 ## Performance on 4090 24G PCIE
 Unit in ms, Prefix = 512, Batch size = 1
@@ -63,3 +65,7 @@ PP+TP Degree= 4 4 means the first and second pipeline stages are both doing tens
 | PP+TP Degree | 2 2 | 2 2 2 | 4 4 |
 |---|---|---|---|
 | Llama-2-7b  | 14.6  | 14.6 | 9.1 |
+
+Throughput latency plot
+Tree Generation and Verification
+Distributed Tree Spec System

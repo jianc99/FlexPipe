@@ -22,12 +22,13 @@ class LLM_Pipeline:
         self.process_group = self.pp_config["current_group"]
         self.local_rank = dist.get_rank(self.process_group)
         self.num_stages = self.pp_config["num_stages"]
+        self.global_group = self.pp_config["global_group"]
 
         self.pp_engine = LLMEngine(max_length=max_length, model_name=model_name, device=device, pp_config=pp_config, dtype=dtype, batch_size=batch_size)
-        dist.barrier()
+        dist.barrier(self.global_group)
         self.hidden_dim = self.pp_engine.llm.hidden_size
         self.pp_engine.initialize_cuda_graph([1, 128])
-        dist.barrier()
+        dist.barrier(self.global_group)
 
 
     def forward(self,input_ids, position_ids, attention_mask, storage_ids):

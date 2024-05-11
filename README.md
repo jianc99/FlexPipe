@@ -12,20 +12,28 @@ Must ensure NCCL version to be the same across different nodes. In our experimen
 ``` bash
 pip install torch==2.1.1 torchvision==0.16.1 torchaudio==2.1.1 --index-url https://download.pytorch.org/whl/cu118
 pip install transformers==4.36.2
-pip install protobuf
-pip install sentencepiece
 ```
 
 ## Run Scripts
 Run the scripts for each GPU worker. Need to specify the master address and port, and NCCL_SOCKET_IFNAME to specific network interface.
 ``` bash
-export MASTER_ADDR='172.24.46.47'
+export MASTER_ADDR='172.19.136.149'
 export MASTER_PORT=9991
-export WORLD_SIZE=3
+export WORLD_SIZE=6
 export RANK=0
 export NCCL_SOCKET_IFNAME=eno1
 
-CUDA_VISIBLE_DEVICES=1 python3 cross_node_test.py
+CUDA_VISIBLE_DEVICES=0 python3 autoregressive_inference.py --layer_partition 10 11 11 --tp_groups 2 2 2
+```
+
+``` bash
+export MASTER_ADDR='172.19.136.149'
+export MASTER_PORT=9991
+export WORLD_SIZE=8
+export RANK=0
+export NCCL_SOCKET_IFNAME=eno1
+
+CUDA_VISIBLE_DEVICES=0 python3 speculative_decoding.py --target_layer_partition 40 40 --target_tp_groups 4 4 --target_group 0 1 2 3 4 5 6 7 --draft_layer_partition 32 --draft_tp_groups 8 --draft_group 0 1 2 3 4 5 6 7
 ```
 
 
@@ -43,7 +51,7 @@ Unit in ms, Prefix = 512, Batch size = 1
 Unit in ms, Prefix = 512, Batch size = 1
 | Model / # GPUs | 1 | 2 | 4 | 8 |
 |---|---|---|---|---|
-| Llama-2-7b  | 12.7  | 9.0  | 7.2  |   |
+| Llama-2-7b  | 12.7  | 9.0  | 7.3  |   |
 
 ## Performance on 4090 24G PCIE
 Unit in ms, Prefix = 512, Batch size = 1
@@ -65,7 +73,3 @@ PP+TP Degree= 4 4 means the first and second pipeline stages are both doing tens
 | PP+TP Degree | 2 2 | 2 2 2 | 4 4 |
 |---|---|---|---|
 | Llama-2-7b  | 14.6  | 14.6 | 9.1 |
-
-Throughput latency plot
-Tree Generation and Verification
-Distributed Tree Spec System

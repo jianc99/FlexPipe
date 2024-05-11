@@ -94,6 +94,44 @@ def initialized_dist(tp_groups,layer_partition):
     torch.cuda.set_device(global_rank)
     return pp_config
 
+def modify_logits_for_top_p_filtering(logits, top_p):
+    """Set the logits for none top-p values to -inf."""
+    if top_p <= 0.0:
+        return
+    # First sort and calculate cumulative sum of probabilities.
+    sorted_logits, sorted_indices = torch.sort(logits, descending=False)
+    cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
+     # Remove tokens with cumulative top_p above the threshold (token with 0 are kept)
+    sorted_indices_to_remove = cumulative_probs <= (1 - top_p)
+    # scatter sorted tensors to original indexing
+    indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+    logits = logits.masked_fill(indices_to_remove, float('-inf'))
+
+
+def sample(logits, top_k=1, top_p=0.0, temperature=1.0):
+    """Sample from top-k logits.
+    Arguments:
+        logits: Tensor of shape (batch_size, vocab_size)
+    """
+    if top_k == 1:  # Short-circuit for greedy decoding
+        return logits.argmax(dim=-1)
+    else:
+        if top_p > 0.0:
+            assert top_p <= 1.0, 'top-p should be in (0, 1].'
+        if top_k > 0:
+            top_k = min(top_k, logits.size(-1))  # Safety check
+            logits_top, indices = torch.topk(logits, top_k, dim=-1)
+            logits_top /= temperature
+            modify_logits_for_top_p_filtering(logits_top, top_p)
+            return indices[
+                torch.arange(indices.shape[0], device=indices.device),
+                torch.multinomial(torch.softmax(logits_top, dim=-1), num_samples=1).squeeze(dim=-1)
+            ]
+        else:
+            logits_top = logits / temperature
+            modify_logits_for_top_p_filtering(logits_top, top_p)
+            return torch.multinomial(torch.softmax(logits_top, dim=-1), num_samples=1).squeeze(dim=-1)
+
 if __name__ == "__main__":
     tp_groups=[2,4,2]
     layer_partition=[20,40,20]

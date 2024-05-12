@@ -1,6 +1,8 @@
 import torch
 import torch.distributed as dist
 import argparse
+import numpy as np
+import random
 
 #Each stage's global ranks
 #Send list and receive rank
@@ -90,8 +92,8 @@ def initialized_dist(tp_groups,layer_partition):
         'current_layers':current_stage_layers,
     }
     dist.barrier()
-    # torch.cuda.set_device(0)
-    torch.cuda.set_device(global_rank)
+    torch.cuda.set_device(0)
+    # torch.cuda.set_device(global_rank)
     return pp_config
 
 def modify_logits_for_top_p_filtering(logits, top_p):
@@ -131,6 +133,13 @@ def sample(logits, top_k=1, top_p=0.0, temperature=1.0):
             logits_top = logits / temperature
             modify_logits_for_top_p_filtering(logits_top, top_p)
             return torch.multinomial(torch.softmax(logits_top, dim=-1), num_samples=1).squeeze(dim=-1)
+
+def setup_seed(seed):
+     torch.manual_seed(seed)
+     torch.cuda.manual_seed_all(seed)
+     np.random.seed(seed)
+     random.seed(seed)
+     torch.backends.cudnn.deterministic = True
 
 if __name__ == "__main__":
     tp_groups=[2,4,2]

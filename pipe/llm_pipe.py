@@ -510,7 +510,7 @@ class LLM:
         else:
             hidden_states=input_ids
         for idx in range(self.num_layers):
-                hidden_states = self.layer_compute(self.layers[idx], idx, hidden_states, position_ids, attention_mask, storage_ids)
+            hidden_states = self.layer_compute(self.layers[idx], idx, hidden_states, position_ids, attention_mask, storage_ids)
         if self.is_last_stage:
             input_dtype = hidden_states.dtype
             hidden_states = hidden_states.to(torch.float32)

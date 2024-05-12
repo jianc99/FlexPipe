@@ -32,6 +32,7 @@ class LLM_Pipeline:
 
     def forward(self,input_ids, position_ids, attention_mask, storage_ids):
         if self.num_stages == 1:
+            dist.broadcast(input_ids, self.group_indices[self.current_stage][0], self.process_group)
             return self.pp_engine.inference(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask, storage_ids=storage_ids)
         hidden_state = torch.full((self.bsz, input_ids.size(1), self.hidden_dim), 0, dtype=self.dtype, device=input_ids.device)
         output = torch.full((self.bsz, input_ids.size(1), 32000), 0, dtype=torch.float32, device=input_ids.device)

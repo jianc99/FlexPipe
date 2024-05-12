@@ -1,11 +1,10 @@
 import argparse
 import time
 import torch
-import torch.distributed as dist
 import numpy as np
 import os
 import torch.distributed as dist
-from pipe.utils import initialized_dist, args_parse, make_causal_mask, sample
+from pipe.utils import initialized_dist, args_parse, make_causal_mask, sample, setup_seed
 from pipe.pipleline import LLM_Pipeline
 from transformers import LlamaTokenizer
 
@@ -18,17 +17,19 @@ print("="*80)
 print(pp_config)
 global_rank=dist.get_rank()
 
+setup_seed(123)
+
 MAX_LEN = args.M
 DEC_LEN = args.D
 MODEL_NAME = args.model
 DTYPE = torch.float16
-# DEVICE = torch.device("cuda", 0)
-DEVICE = torch.device("cuda", global_rank)
+DEVICE = torch.device("cuda", 0)
+# DEVICE = torch.device("cuda", global_rank)
 T = args.T
 WARM_UP = 10
 tokenizer = LlamaTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
 
-prompt="I love Pittsburgh, it is a great city"
+prompt="Pittsburgh is a city "
 
 
 

@@ -1,5 +1,5 @@
 import torch
-from pipe.llm_pipe import LLMEngine
+from spec.llm_pipe import LLMEngine
 import torch.distributed as dist
 
 class LLM_Pipeline:

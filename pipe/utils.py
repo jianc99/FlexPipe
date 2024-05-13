@@ -27,7 +27,7 @@ def make_causal_mask(
 def args_parse():
     parser = argparse.ArgumentParser(description='Process model configuration and partitions.')
     
-    parser.add_argument('--model', type=str, default="meta-llama/Llama-2-7b-hf", help='Model identifier.')
+    parser.add_argument('--model', type=str, default="meta-llama/Llama-2-70b-hf", help='Model identifier.')
     parser.add_argument('--T', type=int, default=2000, help='Repeat times.')
     parser.add_argument('--B', type=int, default=1, help='Batch size.')
     parser.add_argument('--P', type=int, default=128, help='Prefix length.')

@@ -27,7 +27,7 @@ DEVICE = torch.device("cuda", 0)
 # DEVICE = torch.device("cuda", global_rank)
 T = args.T
 WARM_UP = 10
-tokenizer = LlamaTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
+tokenizer = LlamaTokenizer.from_pretrained("meta-llama/Llama-2-70b-hf")
 
 prompt="Pittsburgh is a city "
 

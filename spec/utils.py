@@ -136,8 +136,8 @@ def initialized_dist(args):
     }
 
     dist.barrier()
-    # torch.cuda.set_device(0)
-    torch.cuda.set_device(global_rank)
+    torch.cuda.set_device(0)
+    # torch.cuda.set_device(global_rank)
     return target_pp_config, draft_pp_config
 
 def modify_logits_for_top_p_filtering(logits, top_p):

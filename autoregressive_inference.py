@@ -29,7 +29,7 @@ T = args.T
 WARM_UP = 10
 tokenizer = LlamaTokenizer.from_pretrained("meta-llama/Llama-2-70b-hf")
 
-prompt="Pittsburgh is a city "
+prompt="Pittsburgh is a city located in "
 
 
 
@@ -45,27 +45,29 @@ prefix_storage_ids = torch.arange(PREFIX_LEN, device=DEVICE)
 logits = engine.forward(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask[..., :PREFIX_LEN,:], storage_ids=prefix_storage_ids)
 seq_offset=PREFIX_LEN
 
+# dist.broadcast_object_list
+
 dist.barrier()
 torch.cuda.synchronize()
 if global_rank==0:
     t1 = time.time()
-    next_token=sample(logits[:,-1,:], 20, 0.9, 0.6).view(1,-1)
+    next_token=sample(logits[:,-1,:], 1, 0.9, 0.6).view(1,-1)
     output = next_token.clone()
-    while seq_offset<128:
+    while output.size(1)<128:
         control_tensor = torch.tensor([1], device=DEVICE)
         dist.broadcast(control_tensor,0)
         input_ids=next_token
         position_ids = torch.full((1,1),seq_offset, device=DEVICE)
         storage_ids = torch.tensor(seq_offset, device=DEVICE)
         logits = engine.forward(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask[..., seq_offset,:], storage_ids=storage_ids)
-        next_token=sample(logits[:,-1,:], 20, 0.9, 0.6).view(1,-1)
+        next_token=sample(logits[:,-1,:], 1, 0.9, 0.6).view(1,-1)
         output = torch.cat((output, next_token),dim=-1)
         seq_offset+=1
     control_tensor = torch.tensor([-1], device=DEVICE)
     dist.broadcast(control_tensor,0)
     torch.cuda.synchronize()
     t2=time.time()
-    print(tokenizer.decode(output[0]), (t2-t1)/(seq_offset-PREFIX_LEN))
+    print(tokenizer.decode(output[0]), (t2-t1)/(output.size(1)))
 
 else:
     control_tensor = torch.tensor([-1], device=DEVICE)

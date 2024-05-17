@@ -1,6 +1,9 @@
 import torch
 import torch.distributed as dist
 import argparse
+import numpy as np
+import random
+from datasets import load_dataset
 
 #Each stage's global ranks
 #Send list and receive rank
@@ -8,6 +11,29 @@ import argparse
 # embed+ First stage layers + send to next
 # Receive from previous, layers , send to next
 # receive from previous, last stage layers + epsilon+ norm + lm head + broadcast
+
+def convert_dataset(tokenizer, file_path):
+    dataset = load_dataset("json", data_files=file_path, split="train")
+    def tokenize_function(examples):
+            input_ids = torch.Tensor(examples['input_ids'])
+            labels = input_ids.clone()
+            if tokenizer.pad_token_id is not None:
+                 labels[labels == tokenizer.pad_token_id] = -100
+            ret = {
+                "input_ids": input_ids,
+                "labels": labels
+            }
+            return ret
+    dataset = dataset.map(tokenize_function, batched=True, remove_columns=['input_tokens'])
+    dataset.set_format(type='torch', columns=['input_ids', "labels"])
+    return dataset
+
+def setup_seed(seed):
+     torch.manual_seed(seed)
+     torch.cuda.manual_seed_all(seed)
+     np.random.seed(seed)
+     random.seed(seed)
+     torch.backends.cudnn.deterministic = True
 
 def make_causal_mask(
     input_ids_shape: torch.Size, dtype: torch.dtype, device: torch.device
@@ -32,15 +58,22 @@ def args_parse():
     parser.add_argument('--P', type=int, default=128, help='Prefix length.')
     parser.add_argument('--M', type=int, default=512, help='Maximum length.')
     parser.add_argument('--D', type=int, default=1, help='Decrement length.')
-
+    parser.add_argument('--seed', type=int, default=123, help='Random seed.')
+    parser.add_argument('--dataset', type=str, default="/dataset/c4_small.json", help='dataset path')
+    # Sample parameters
+    parser.add_argument('--top_k', type=int, default=1, help='Target samlple top_k')
+    parser.add_argument('--top_p', type=float, default=0.9, help='Target sample top_p.')
+    parser.add_argument('--temperature', type=float, default=0.6, help='Target sample temperature.')
+    # Target model information
     parser.add_argument('--target_layer_partition', nargs='+', type=int, help='Layer partitioning as a list of integers.')
     parser.add_argument('--target_tp_groups', nargs='+', type=int, help='TP groups as a list of integers.')
     parser.add_argument('--target_group', nargs='+', type=int, help='Target group of ranks')
-
+    # Draft model information
     parser.add_argument('--draft_layer_partition', nargs='+', type=int, help='Layer partitioning as a list of integers.')
     parser.add_argument('--draft_tp_groups', nargs='+', type=int, help='TP groups as a list of integers.')
     parser.add_argument('--draft_group', nargs='+', type=int, help='Target group of ranks')
-
+    # Speculative decoding parameters
+    parser.add_argument('--depth', type=int, default=1, help='Target samlple top_k')
     args = parser.parse_args()
     
     return args
@@ -179,21 +212,40 @@ def sample(logits, top_k=1, top_p=0.0, temperature=1.0):
             return torch.multinomial(torch.softmax(logits_top, dim=-1), num_samples=1).squeeze(dim=-1)
 
 if __name__ == "__main__":
-    target_tp_groups=[4,4]
-    target_layer_partition=[40,40]
-    target_groups=[2, 3, 4, 5, 6, 7, 8, 9]
-    global_rank=3
-    target_stage_num = len(target_tp_groups)
-    target_tp_rank_groups = gen_tp_rank_groups(target_tp_groups,target_groups)
-    target_index_mapping = generate_index_mapping(target_tp_rank_groups)
-    target_current_stage = get_group_for_rank(global_rank,target_index_mapping)
-    target_current_stage_layers=gen_include_layers(target_current_stage,target_layer_partition)
-    target_pp_config={
-        'num_stages':target_stage_num,
-        'groups_indices':target_tp_rank_groups,
-        'current_stage':target_current_stage,
-        'current_layers':target_current_stage_layers,
-        }
-    print(target_index_mapping)
-    print(target_pp_config)
-    
+    # target_tp_groups=[4,4]
+    # target_layer_partition=[40,40]
+    # target_groups=[2, 3, 4, 5, 6, 7, 8, 9]
+    # global_rank=3
+    # target_stage_num = len(target_tp_groups)
+    # target_tp_rank_groups = gen_tp_rank_groups(target_tp_groups,target_groups)
+    # target_index_mapping = generate_index_mapping(target_tp_rank_groups)
+    # target_current_stage = get_group_for_rank(global_rank,target_index_mapping)
+    # target_current_stage_layers=gen_include_layers(target_current_stage,target_layer_partition)
+    # target_pp_config={
+    #     'num_stages':target_stage_num,
+    #     'groups_indices':target_tp_rank_groups,
+    #     'current_stage':target_current_stage,
+    #     'current_layers':target_current_stage_layers,
+    #     }
+    # print(target_index_mapping)
+    # print(target_pp_config)
+    from transformers import LlamaTokenizer, DataCollatorForLanguageModeling
+    from torch.utils.data.dataloader import DataLoader
+    from accelerate import Accelerator
+    from tqdm import tqdm
+    tokenizer = LlamaTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenized_dataset_eval = convert_dataset(tokenizer=tokenizer,file_path="../dataset/c4_small.json").select(list(range(0,20)))
+    print(tokenized_dataset_eval)
+    data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
+    dataloader = DataLoader(tokenized_dataset_eval, batch_size=1, collate_fn=data_collator, shuffle=False)
+    accelerator = Accelerator()
+    dataloader = accelerator.prepare(dataloader)
+    num_eval_steps = len(dataloader)
+    print(tokenizer.decode([0,1,2,3]))
+    for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
+        input_ids = batch['input_ids'][..., :128]
+        labels = batch['labels'][..., :128]
+        terminate = False
+        if labels[0][-1] == -100: continue
+        print(tokenizer.decode(input_ids[0]))

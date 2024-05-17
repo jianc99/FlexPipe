@@ -5,9 +5,13 @@ import torch.distributed as dist
 import numpy as np
 import os
 import torch.distributed as dist
-from spec.utils import initialized_dist, args_parse, make_causal_mask, sample, setup_seed
+from spec.utils import initialized_dist, args_parse, make_causal_mask, sample, setup_seed, convert_dataset
 from spec.pipleline import LLM_Pipeline
-from transformers import LlamaTokenizer
+
+from transformers import LlamaTokenizer, DataCollatorForLanguageModeling
+from torch.utils.data.dataloader import DataLoader
+from accelerate import Accelerator
+from tqdm import tqdm
 
 
 
@@ -35,7 +39,6 @@ DEVICE = torch.device("cuda", 0)
 # DEVICE = torch.device("cuda", global_rank)
 # T = args.T
 # WARM_UP = 10
-tokenizer = LlamaTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
 
 # prompt="I love Pittsburgh, it is a great city"
 target_engine=None
@@ -47,7 +50,24 @@ if draft_pp_config!=None:
 if target_pp_config!= None:
     target_engine = LLM_Pipeline(max_length=MAX_LEN, model_name=TARGET_MODEL_NAME, device=DEVICE, pp_config=target_pp_config)
 
+dist.barrier()
+torch.cuda.synchronize()
 # time.sleep(100)
+if global_rank == 0:
+    tokenizer = LlamaTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenized_dataset_eval = convert_dataset(tokenizer=tokenizer,file_path="../dataset/c4_small.json").select(list(range(0,20)))
+    data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
+    dataloader = DataLoader(tokenized_dataset_eval, batch_size=1, collate_fn=data_collator, shuffle=False)
+    accelerator = Accelerator()
+    dataloader = accelerator.prepare(dataloader)
+    num_eval_steps = len(dataloader)
+    for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
+        input_ids = batch['input_ids'][..., :128]
+        labels = batch['labels'][..., :128]
+        terminate = False
+        if labels[0][-1] == -100: continue
+
 
 prompt = "Pittsburgh is a city located in "
 input_ids = tokenizer.encode(prompt, return_tensors="pt").to(DEVICE)
@@ -63,9 +83,6 @@ if target_pp_config!=None:
     logits = target_engine.forward(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask[..., :PROMPT_LEN,:], storage_ids=prefix_storage_ids)
 if draft_pp_config!=None:
     draft_engine.forward(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask[..., :PROMPT_LEN,:], storage_ids=prefix_storage_ids)
-
-dist.barrier()
-torch.cuda.synchronize()
 
 if global_rank==0:
     t1 = time.time()
@@ -135,8 +152,8 @@ if global_rank==0:
         all_accept+=accepted_len
         # print(accepted_len, draft_seq_offset, target_seq_offset)
         
-    torch.cuda.synchronize()
-    t2=time.time()
+    # torch.cuda.synchronize()
+    # t2=time.time()
 
     control_tensor = torch.tensor([-1,0,0], device=DEVICE)
     dist.broadcast(control_tensor,0)
@@ -145,7 +162,7 @@ if global_rank==0:
     # print(tokenizer.decode(output[0]), (t2-t1)/(seq_offset-PREFIX_LEN))
     print(tokenizer.decode(output[0]))
     print(all_accept/itr)
-    print((t2-t1)/output.size(1))
+    # print((t2-t1)/output.size(1))
     # print(tokenizer.decode(draft_output[0]))
 
 else:

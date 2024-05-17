@@ -27,7 +27,7 @@ class LLM_Pipeline:
         self.pp_engine = LLMEngine(max_length=max_length, model_name=model_name, device=device, pp_config=pp_config, dtype=dtype, batch_size=batch_size)
         dist.barrier(self.global_group)
         self.hidden_dim = self.pp_engine.llm.hidden_size
-        self.pp_engine.initialize_cuda_graph([1, 128])
+        self.pp_engine.initialize_cuda_graph([1,2])
         dist.barrier(self.global_group)
 
 

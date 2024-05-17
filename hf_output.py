@@ -1,17 +1,26 @@
 import torch
-from transformers import LlamaForCausalLM, LlamaTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
-PREFIX_LEN = 128
-DEVICE = 'cuda:0'
+tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf", use_fast=False)
+model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-70b-hf", torch_dtype=torch.float16, device_map="auto")
 
-tokenizer = LlamaTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
-model = LlamaForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf").to(DEVICE)
+model.eval()
+max_length=128
 
-input_ids = torch.full((1, PREFIX_LEN), 11, device=DEVICE)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+prompt = "Pittsburgh is a city located in "
+input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
 
 # Generate logits
 with torch.no_grad():
-    outputs = model(input_ids=input_ids)
-    logits = outputs.logits
+    outputs = model.generate(
+            input_ids, 
+            max_length=max_length, 
+            num_return_sequences=1, 
+            pad_token_id=tokenizer.eos_token_id,
+            do_sample=False,
+        )
 
-print(logits)
+generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+print(generated_text)

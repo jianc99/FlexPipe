@@ -21,12 +21,12 @@ MAX_LEN = args.M
 DEC_LEN = args.D
 MODEL_NAME = args.model
 DTYPE = torch.float16
-DEVICE = torch.device("cuda", 0)
-# DEVICE = torch.device("cuda", global_rank)
+# DEVICE = torch.device("cuda", 0)
+DEVICE = torch.device("cuda", global_rank)
 PREFIX_LEN= args.P
-T = args.T
+T = 100
 WARM_UP = 10
-for batch_size in range(1,128):
+for batch_size in range(1,64):
     engine = LLM_Pipeline(max_length=MAX_LEN, model_name=args.model, device=DEVICE, pp_config=pp_config, batch_size=batch_size)
     input_ids = torch.randint(low=3, high=30000, size=(batch_size, PREFIX_LEN), device=DEVICE)
     attention_mask = make_causal_mask((MAX_LEN, MAX_LEN), dtype=DTYPE, device=DEVICE)
@@ -35,7 +35,7 @@ for batch_size in range(1,128):
     prefix_storage_ids = torch.arange(PREFIX_LEN, device=DEVICE)
     logits = engine.forward(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask[..., :PREFIX_LEN,:], storage_ids=prefix_storage_ids)
 
-    input_ids = torch.randint(low=3, high=30000, size=(1, DEC_LEN), device=DEVICE)
+    input_ids = torch.randint(low=3, high=30000, size=(batch_size, DEC_LEN), device=DEVICE)
     storage_ids = torch.arange(DEC_LEN, device=DEVICE) + PREFIX_LEN
     position_ids = storage_ids.clone().unsqueeze(0)
     attention_mask = attention_mask[..., PREFIX_LEN: PREFIX_LEN + DEC_LEN,:].clone()

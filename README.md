@@ -14,6 +14,8 @@ pip install torch==2.1.1 torchvision==0.16.1 torchaudio==2.1.1 --index-url https
 pip install transformers==4.36.2
 pip install protobuf
 pip install sentencepiece
+pip install datasets==2.16.1
+pip install accelerate==0.26.1
 ```
 
 ## Run Scripts
@@ -36,6 +38,11 @@ export RANK=0
 export NCCL_SOCKET_IFNAME=eno1
 
 CUDA_VISIBLE_DEVICES=0 python3 speculative_decoding.py --target_layer_partition 40 40 --target_tp_groups 4 4 --target_group 0 1 2 3 4 5 6 7 --draft_layer_partition 32 --draft_tp_groups 8 --draft_group 0 1 2 3 4 5 6 7
+```
+
+To compare the inference result with huggingface model, just run with the same prompt
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 python hf_output.py
 ```
 
 

@@ -56,6 +56,12 @@ Unit in ms, Prefix = 512, Batch size = 1
 | Llama-2-70b | x  |   |   |   |
 | vicuna-33b-v1.3 | 49.0  |   |   |   |
 
+## Performance on A100 80G SXM
+Unit in ms, Prefix = 512, Batch size = 1
+| Model / # GPUs | 1 | 2 | 4 | 8 |
+|---|---|---|---|---|
+| Llama-2-70b | x  |   | 37.5  | 27.7 |
+
 ## Performance on H100 80G PCIE
 Unit in ms, Prefix = 512, Batch size = 1
 | Model / # GPUs | 1 | 2 | 4 | 8 |

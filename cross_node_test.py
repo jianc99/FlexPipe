@@ -39,6 +39,8 @@ if local_rank in [0]:
     if local_rank == 0:
         dist.send(hidden,1)
     dist.broadcast(output,1)
+    object_list = [{"input_ids":hidden,"seqlen_offset":hidden}]
+    dist.broadcast_object_list(object_list=object_list,src=0)
 
 if local_rank in [1]:
     dist.recv(hidden,0)
@@ -47,4 +49,6 @@ if local_rank in [1]:
     print(hidden,local_rank)
     output=hidden
     dist.broadcast(output,1)
+    object_list = [{"input_ids":hidden,"seqlen_offset":hidden}]
+    dist.broadcast_object_list(object_list=object_list,src=0)
 print(output,local_rank)

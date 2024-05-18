@@ -28,8 +28,8 @@ T = args.T
 WARM_UP = 10
 
 engine = LLM_Pipeline(max_length=MAX_LEN, model_name=args.model, device=DEVICE, pp_config=pp_config)
-# input_ids = torch.randint(low=3, high=30000, size=(1, PREFIX_LEN), device=DEVICE)
-input_ids = torch.full((1, PREFIX_LEN),11,device=DEVICE)
+input_ids = torch.randint(low=3, high=30000, size=(1, PREFIX_LEN), device=DEVICE)
+# input_ids = torch.full((1, PREFIX_LEN),11,device=DEVICE)
 attention_mask = make_causal_mask((MAX_LEN, MAX_LEN), dtype=DTYPE, device=DEVICE)
 attention_mask = attention_mask[None, None, :, :]
 position_ids = torch.arange(PREFIX_LEN, device=DEVICE).unsqueeze(0)

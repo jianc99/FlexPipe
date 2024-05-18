@@ -75,7 +75,7 @@ Unit in ms, Prefix = 512, Batch size = 1
 | Model / # GPUs | 1 | 2 | 4 | 8 |
 |---|---|---|---|---|
 | Llama-2-7b  | 22.1  | 14.4  | 9.0  | 7.0  |
-<!-- | Llama-2-70b | x  |  x | x  | x  | -->
+| Llama-2-70b | x  |  x | 69.9  | x  |
 
 PP+TP Degree= 4 4 means the first and second pipeline stages are both doing tensor parallelism with degree=4.
 

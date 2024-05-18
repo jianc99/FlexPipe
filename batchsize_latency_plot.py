@@ -26,7 +26,7 @@ DEVICE = torch.device("cuda", global_rank)
 PREFIX_LEN= args.P
 T = 100
 WARM_UP = 10
-for batch_size in range(1,64):
+for batch_size in [1,2,4,8,16,32,64,128]:
     engine = LLM_Pipeline(max_length=MAX_LEN, model_name=args.model, device=DEVICE, pp_config=pp_config, batch_size=batch_size)
     input_ids = torch.randint(low=3, high=30000, size=(batch_size, PREFIX_LEN), device=DEVICE)
     attention_mask = make_causal_mask((MAX_LEN, MAX_LEN), dtype=DTYPE, device=DEVICE)
@@ -51,3 +51,4 @@ for batch_size in range(1,64):
     t2 = time.time()
     if dist.get_rank() == 0:
         print("Max Length :{}, Decode Length :{}, Prefix Length :{}, inference time:{}s".format(MAX_LEN, DEC_LEN, PREFIX_LEN, (t2 - t1)/ T))
+    engine = None

@@ -2,8 +2,8 @@
 ## Installation
 ### Create Virtual Environment
 ``` bash
-conda create -n flexpipe python=3.11
-conda activate flexpipe
+conda create -n hesse python=3.11
+conda activate hesse
 ```
 
 ### Install Necessary Packages

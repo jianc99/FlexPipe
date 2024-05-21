@@ -65,4 +65,5 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
         if next_token[0] == 2 or next_token[0] == 0: terminate = True
     torch.cuda.synchronize()
     t2=time.time()
-    print(tokenizer.decode(output[0]), (t2-t1)/(output.size(1)))
+    if global_rank == 0:
+        print(tokenizer.decode(output[0]), (t2-t1)/(output.size(1)))

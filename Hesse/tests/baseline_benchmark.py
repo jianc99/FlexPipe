@@ -46,7 +46,7 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     attention_mask = attention_mask[None, None, :, :]
     position_ids = torch.arange(prefix_len, device=DEVICE).unsqueeze(0)
     prefix_storage_ids = torch.arange(prefix_len, device=DEVICE)
-    logits = engine.forward(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask[..., :PREFIX_LEN,:], storage_ids=prefix_storage_ids)
+    logits = engine.forward(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask[..., :prefix_len,:], storage_ids=prefix_storage_ids)
     seq_offset=prefix_len
 
     dist.barrier()

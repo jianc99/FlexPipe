@@ -32,7 +32,7 @@ class LLM_Pipeline:
         self.num_stages = self.pp_config["num_stages"]
         if self.type == "spec":
             self.global_group = self.pp_config["global_group"]
-
+            
         self.pp_engine = LLMEngine(max_length=max_length, model_name=model_name, device=device, pp_config=pp_config, dtype=dtype, batch_size=batch_size)
         if self.type == "spec":
             dist.barrier(self.global_group)
@@ -48,12 +48,14 @@ class LLM_Pipeline:
 
     def forward(self,input_ids, position_ids, attention_mask, storage_ids):
         if self.pp_config == None:
-            output = torch.full((self.bsz, input_ids.size(1), 32000), 0, dtype=torch.float32, device=input_ids.device)
+            output = torch.full((input_ids.size(0), input_ids.size(1), 32000), 0, dtype=torch.float32, device=input_ids.device)
             dist.broadcast(output, self.last_stage_rank_0)
             return output
         if self.num_stages == 1:
             # dist.broadcast(input_ids, self.group_indices[self.current_stage][0], self.process_group)
-            return self.pp_engine.inference(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask, storage_ids=storage_ids)
+            output = self.pp_engine.inference(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask, storage_ids=storage_ids)
+            dist.broadcast(output,self.group_indices[-1][0])
+            return output
         hidden_state = torch.full((self.bsz, input_ids.size(1), self.hidden_dim), 0, dtype=self.dtype, device=input_ids.device)
         output = torch.full((self.bsz, input_ids.size(1), 32000), 0, dtype=torch.float32, device=input_ids.device)
 
@@ -79,4 +81,15 @@ class LLM_Pipeline:
                 dist.send(hidden_state,self.group_indices[self.current_stage+1][0])
         dist.broadcast(output,self.group_indices[-1][0])
         return output
+    
+    def gather_kv_incremental(self, indices: list[int], offset:int):
+        if self.pp_config == None:
+            return
+        self.pp_engine.llm.kv_cache.gather_kv_incremental(indices, offset)
+    
+    def clear_kv(self):
+        if self.pp_config == None:
+            return
+        self.pp_engine.llm.kv_cache.clear()
+
 

@@ -14,8 +14,8 @@ from tqdm import tqdm
 
 args=args_parse_baseline()
 pp_config=initialized_dist_baseline(args.tp_groups,args.layer_partition)
-# print("="*80)
-# print(pp_config)
+print("="*80)
+print(pp_config)
 global_rank=dist.get_rank()
 if global_rank == 0:
     print(args)

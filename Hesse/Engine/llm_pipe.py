@@ -330,6 +330,7 @@ class LLM:
         dtype = torch.float16) -> None:
         self.pp_config = pp_config
         self.process_group = self.pp_config["current_group"]
+        self.global_group = self.pp_config["global_group"]
         self.rank = dist.get_rank(self.process_group)
         self.world_size = dist.get_world_size(self.process_group)
         self.is_first_stage = (self.pp_config["current_stage"] == 0)
@@ -355,7 +356,6 @@ class LLM:
         self.mempool = None
 
     def init_parameters(self):
-        
         for rank in range(self.world_size):
             if self.rank == rank:
                 hf_model = LlamaForCausalLM.from_pretrained(self.model_name, torch_dtype=self.dtype)
@@ -381,7 +381,7 @@ class LLM:
                     gc.collect()
                     
                 self.num_layers = len(self.layers)
-            dist.barrier(self.process_group) 
+            dist.barrier(self.global_group) 
 
     # @torch.inference_mode()
     # def initialize_cuda_graph(self, 

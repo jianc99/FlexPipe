@@ -56,7 +56,7 @@ def args_parse_spec():
     parser.add_argument('--start', type=int, default=0, help='Dataset start index.')
     parser.add_argument('--end', type=int, default=200, help='Dataset end index.')
     # Sample parameters
-    parser.add_argument('--top_k', type=int, default=20, help='Target samlple top_k')
+    parser.add_argument('--top_k', type=int, default=1, help='Target samlple top_k')
     parser.add_argument('--top_p', type=float, default=0.9, help='Target sample top_p.')
     parser.add_argument('--temperature', type=float, default=0.6, help='Target sample temperature.')
     # Target model information
@@ -207,6 +207,7 @@ def initialized_dist_baseline(tp_groups,layer_partition):
         process_groups.append(dist.new_group(process_group))
     current_tp_group=process_groups[current_stage]
     current_stage_layers=gen_include_layers(current_stage,layer_partition)
+    global_group = dist.new_group(list(range(dist.get_world_size())))
     pp_config={
         'num_stages':stage_num,
         'process_groups':process_groups,
@@ -214,6 +215,7 @@ def initialized_dist_baseline(tp_groups,layer_partition):
         'current_group':current_tp_group,
         'current_stage':current_stage,
         'current_layers':current_stage_layers,
+        'global_group': global_group,
     }
     dist.barrier()
     return pp_config

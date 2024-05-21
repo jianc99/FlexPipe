@@ -4,8 +4,8 @@ import numpy as np
 import sys
 sys.path.append("..")
 import torch.distributed as dist
-from Engine.utils import initialized_dist_baseline, args_parse_baseline, make_causal_mask, sample, setup_seed, convert_dataset
-from Engine.pipleline import LLM_Pipeline
+from Hesse.Engine.utils import initialized_dist_baseline, args_parse_baseline, make_causal_mask, sample, setup_seed, convert_dataset
+from Hesse.Engine.pipleline import LLM_Pipeline
 from transformers import LlamaTokenizer, DataCollatorForLanguageModeling
 from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm

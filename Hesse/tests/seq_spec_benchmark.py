@@ -17,10 +17,10 @@ from tqdm import tqdm
 
 args=args_parse_spec()
 target_pp_config, draft_pp_config, target_last_stage_rank0, draft_last_stage_rank0 = initialized_dist_spec(args)
-# print(args)
-# print("="*80)
-# print(target_pp_config,draft_pp_config)
 global_rank=dist.get_rank()
+#     print(args)
+#     print("="*80)
+#     print(target_pp_config,draft_pp_config, target_last_stage_rank0, draft_last_stage_rank0, global_rank)
 setup_seed(args.seed)
 
 top_k=args.top_k
@@ -34,8 +34,8 @@ DTYPE = torch.float16
 # DEVICE = torch.device("cuda", 0)
 DEVICE = torch.device("cuda", global_rank)
 
-draft_engine = LLM_Pipeline(max_length=MAX_LEN, model_name=DRAFT_MODEL_NAME, device=DEVICE, pp_config=draft_pp_config, type="spec", last_stage_rank_0=target_last_stage_rank0, cg_list=[2,128])
-target_engine = LLM_Pipeline(max_length=MAX_LEN, model_name=TARGET_MODEL_NAME, device=DEVICE, pp_config=target_pp_config, type="spec", last_stage_rank_0=draft_last_stage_rank0, cg_list=[1,2,128])
+draft_engine = LLM_Pipeline(max_length=MAX_LEN, model_name=DRAFT_MODEL_NAME, device=DEVICE, pp_config=draft_pp_config, type="spec", last_stage_rank_0=draft_last_stage_rank0, cg_list=[2,128])
+target_engine = LLM_Pipeline(max_length=MAX_LEN, model_name=TARGET_MODEL_NAME, device=DEVICE, pp_config=target_pp_config, type="spec", last_stage_rank_0=target_last_stage_rank0, cg_list=[1,2,128])
 
 tokenizer = LlamaTokenizer.from_pretrained(TARGET_MODEL_NAME)
 tokenizer.pad_token = tokenizer.eos_token

@@ -56,7 +56,7 @@ def args_parse_spec():
     parser.add_argument('--start', type=int, default=0, help='Dataset start index.')
     parser.add_argument('--end', type=int, default=200, help='Dataset end index.')
     # Sample parameters
-    parser.add_argument('--top_k', type=int, default=1, help='Target samlple top_k')
+    parser.add_argument('--top_k', type=int, default=20, help='Target samlple top_k')
     parser.add_argument('--top_p', type=float, default=0.9, help='Target sample top_p.')
     parser.add_argument('--temperature', type=float, default=0.6, help='Target sample temperature.')
     # Target model information

@@ -15,7 +15,7 @@ class LLM_Pipeline:
                 last_stage_rank_0 : int = 0,
                 ) -> None:
         if pp_config == None:
-            self.pp_config = pp_config
+            self.pp_config = None
             self.last_stage_rank_0 = last_stage_rank_0
             return
         self.pp_config = pp_config
@@ -84,12 +84,16 @@ class LLM_Pipeline:
     
     def gather_kv_incremental(self, indices: list[int], offset:int):
         if self.pp_config == None:
+            dist.barrier()
             return
         self.pp_engine.llm.kv_cache.gather_kv_incremental(indices, offset)
+        dist.barrier()
     
     def clear_kv(self):
         if self.pp_config == None:
+            dist.barrier()
             return
         self.pp_engine.llm.kv_cache.clear()
+        dist.barrier()
 
 

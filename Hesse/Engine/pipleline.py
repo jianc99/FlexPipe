@@ -17,6 +17,7 @@ class LLM_Pipeline:
         if pp_config == None:
             self.pp_config = None
             self.last_stage_rank_0 = last_stage_rank_0
+            self.max_length = max_length
             return
         self.pp_config = pp_config
         self.bsz = batch_size
@@ -84,16 +85,16 @@ class LLM_Pipeline:
     
     def gather_kv_incremental(self, indices: list[int], offset:int):
         if self.pp_config == None:
-            dist.barrier()
             return
         self.pp_engine.llm.kv_cache.gather_kv_incremental(indices, offset)
-        dist.barrier()
     
     def clear_kv(self):
         if self.pp_config == None:
-            dist.barrier()
             return
         self.pp_engine.llm.kv_cache.clear()
-        dist.barrier()
-
+    
+    def gather_kv(self, indices: list[int]):
+        if self.pp_config == None:
+            return
+        self.pp_engine.llm.kv_cache.gather_kv(indices)
 

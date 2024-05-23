@@ -190,7 +190,6 @@ def initialized_dist_spec(args):
         'current_layers':draft_current_stage_layers,
         'global_group':draft_global_group,
     }
-    dist.barrier()
     return target_pp_config, draft_pp_config, target_last_stage_rank0, draft_last_stage_rank0
 
 def initialized_dist_baseline(tp_groups,layer_partition):

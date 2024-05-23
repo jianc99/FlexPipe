@@ -94,7 +94,9 @@ class GreedySTree(Tree):
                 torch.cuda.synchronize()
                 t1 = time.time()
         new_tokens_set = self.sampling_callables[grow_step](self.draft_logits[idx_list])
-        
+        # num_samples = max_branch
+        # new_tokens_set = self.draft_logits[idx_list].topk(k=num_samples).indices.flatten()
+
         self.tokens[self.num_nodes: self.num_nodes + total_branch] = new_tokens_set[self.sample_gather_indices[grow_step]]
             
         if benchmark:

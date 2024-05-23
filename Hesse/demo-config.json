@@ -1,9 +1,9 @@
 {
-    "acceptance_rate_vector": "acceptance-rate-vector.pt",
+    "acceptance_rate_vector": "7b-70b.pt",
     "max_depth": 10,
     "max_budget": 128,
-    "draft_time": 0.3,
+    "draft_time": 9,
     "valid_budget": [1, 2, 4, 8, 16, 32],
-    "target_time":[10, 10, 10, 12, 14, 18],
+    "target_time":[63,65,67, 70, 75, 78],
     "dst": "demo_tree.pt"
 }

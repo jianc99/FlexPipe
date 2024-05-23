@@ -30,7 +30,8 @@ PREFIX_LEN= args.P
 T = 100
 WARM_UP = 10
 latency_list=[]
-for batch_size in [1,4,8,16,64,128]:
+bsz_list = [1,8,32,64,128,256]
+for batch_size in bsz_list:
     engine = LLM_Pipeline(max_length=MAX_LEN, model_name=args.model, device=DEVICE, pp_config=pp_config, batch_size=batch_size, type = "baseline", cg_list=[1])
     input_ids = torch.randint(low=3, high=30000, size=(batch_size, PREFIX_LEN), device=DEVICE)
     attention_mask = make_causal_mask((MAX_LEN, MAX_LEN), dtype=DTYPE, device=DEVICE)
@@ -60,8 +61,8 @@ for batch_size in [1,4,8,16,64,128]:
 
 if global_rank == 0:
     throughput = [1 / latency_val for latency_val in latency_list]
-    result = [batch * lat for batch, lat in zip([1,4,8,16,64,128], throughput)]
-    plt.plot([1,4,8,16,64,128], result, marker='o')
+    result = [batch * lat for batch, lat in zip(bsz_list, throughput)]
+    plt.plot(bsz_list, result, marker='o')
     plt.xlabel('Batch Size')
     plt.ylabel('Throughput')
     plt.title('Throughput vs. Batch Size')

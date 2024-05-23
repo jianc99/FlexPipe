@@ -70,12 +70,11 @@ def simulation_fast(target_model : LLM_Pipeline, draft_model: LLM_Pipeline, data
                                     position_ids = position_ids,
                                     sampling_callables=sampling_callables,
                                     sample_gather_indices = sample_gather_indices)
-            dist.barrier()
             torch.cuda.synchronize()
             t1 = time.time()
             while input_ids.shape[1] < 256 and terminate == False:
                 spectree.construct_grow_map()
-                valid_tokens, draft_kv_len, target_kv_len,time1,time2, time3, terminate = spectree.verify(benchmark=True)
+                valid_tokens, draft_kv_len, target_kv_len, terminate = spectree.verify()
                 
                 num_decoding_steps += (valid_tokens.shape[0] - input_ids.shape[1])
                 num_large_model_steps += 1
@@ -88,8 +87,8 @@ def simulation_fast(target_model : LLM_Pipeline, draft_model: LLM_Pipeline, data
             draft_model.clear_kv()
             target_model.clear_kv()
             if global_rank == 0:
-                print(time1, time2, time3)
-    print("total time :{:.5f}s, latency :{:.5f}s, decoding step: {}, large model step: {}".format(total_time, total_time / num_decoding_steps, num_decoding_steps, num_large_model_steps))
+                print(tokenizer.decode(input_ids[0]))
+            print("total time :{:.5f}s, latency :{:.5f}s, decoding step: {}, large model step: {}".format(total_time, total_time / num_decoding_steps, num_decoding_steps, num_large_model_steps))
     return num_decoding_steps / num_large_model_steps
 
 
@@ -112,12 +111,6 @@ idx_lists = grow_map["roots"]
 branch_lists = grow_map['branches']
 draft_step = len(grow_map["roots"])
 
-graph_capture_list = [sum(x) for x in branch_lists]
-
-target_model = LLM_Pipeline(max_length=MAX_LEN, model_name=TARGET_MODEL_NAME, device=DEVICE, pp_config=target_pp_config, type="spec", last_stage_rank_0=target_last_stage_rank0, cg_list=graph_capture_list)
-draft_model =  LLM_Pipeline(max_length=MAX_LEN, model_name=DRAFT_MODEL_NAME, device=DEVICE, pp_config=draft_pp_config, type="spec", last_stage_rank_0=draft_last_stage_rank0, cg_list=[tree_size])
-dist.barrier()
-
 sampling_callables = {}
 sample_gather_indices = {}
 for i in range(draft_step - 1):
@@ -135,6 +128,13 @@ for i in range(draft_step - 1):
         ith_gather_list.append(branch_index)
     ith_gather_list = torch.cat(ith_gather_list)
     sample_gather_indices[i] = ith_gather_list
+
+dist.barrier()
+
+graph_capture_list = [sum(x) for x in branch_lists]
+
+draft_model =  LLM_Pipeline(max_length=MAX_LEN, model_name=DRAFT_MODEL_NAME, device=DEVICE, pp_config=draft_pp_config, type="spec", last_stage_rank_0=draft_last_stage_rank0, cg_list=graph_capture_list)
+target_model = LLM_Pipeline(max_length=MAX_LEN, model_name=TARGET_MODEL_NAME, device=DEVICE, pp_config=target_pp_config, type="spec", last_stage_rank_0=target_last_stage_rank0, cg_list=[tree_size])
 
 
 simulation_fast(target_model=target_model, draft_model=draft_model, dataloader=dataloader, T=args.T, top_p=args.P,

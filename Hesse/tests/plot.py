@@ -30,7 +30,7 @@ PREFIX_LEN= args.P
 T = 100
 WARM_UP = 10
 latency_list=[]
-bsz_list = [1,8,32,64,128,256]
+bsz_list = [1,8,32]
 for batch_size in bsz_list:
     engine = LLM_Pipeline(max_length=MAX_LEN, model_name=args.model, device=DEVICE, pp_config=pp_config, batch_size=batch_size, type = "baseline", cg_list=[1])
     input_ids = torch.randint(low=3, high=30000, size=(batch_size, PREFIX_LEN), device=DEVICE)

@@ -3,23 +3,6 @@ import torch.distributed as dist
 import argparse
 import numpy as np
 import random
-from datasets import load_dataset
-
-def convert_dataset(tokenizer, file_path):
-    dataset = load_dataset("json", data_files=file_path, split="train")
-    def tokenize_function(examples):
-            input_ids = torch.Tensor(examples['input_ids'])
-            labels = input_ids.clone()
-            if tokenizer.pad_token_id is not None:
-                 labels[labels == tokenizer.pad_token_id] = -100
-            ret = {
-                "input_ids": input_ids,
-                "labels": labels
-            }
-            return ret
-    dataset = dataset.map(tokenize_function, batched=True, remove_columns=['input_tokens'])
-    dataset.set_format(type='torch', columns=['input_ids', "labels"])
-    return dataset
 
 def setup_seed(seed):
      torch.manual_seed(seed)
@@ -76,7 +59,7 @@ def args_parse_spec():
 def args_parse_baseline():
     parser = argparse.ArgumentParser(description='Process model configuration and partitions.')
     
-    parser.add_argument('--model', type=str, default="meta-llama/Llama-2-70b-hf", help='Model identifier.')
+    parser.add_argument('--model', type=str, default="meta-llama/Llama-2-7b-hf", help='Model identifier.')
     parser.add_argument('--T', type=int, default=2000, help='Repeat times.')
     parser.add_argument('--B', type=int, default=1, help='Batch size.')
     parser.add_argument('--P', type=int, default=128, help='Prefix length.')

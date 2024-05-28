@@ -4,7 +4,8 @@ import numpy as np
 import sys
 sys.path.append("..")
 import torch.distributed as dist
-from Hesse.Engine.utils import initialized_dist_baseline, args_parse_baseline, make_causal_mask, sample, setup_seed, convert_dataset
+from Hesse.Engine.utils import initialized_dist_baseline, args_parse_baseline, make_causal_mask, sample, setup_seed
+from Hesse.Data.data_converter import convert_cnn_dataset
 from Hesse.Engine.pipleline import LLM_Pipeline
 from transformers import LlamaTokenizer, DataCollatorForLanguageModeling
 from torch.utils.data.dataloader import DataLoader
@@ -32,14 +33,15 @@ engine = LLM_Pipeline(max_length=MAX_LEN, model_name=MODEL_NAME, device=DEVICE, 
 
 tokenizer = LlamaTokenizer.from_pretrained(MODEL_NAME)
 tokenizer.pad_token = tokenizer.eos_token
-tokenized_dataset_eval = convert_dataset(tokenizer=tokenizer,file_path="../dataset/c4_small.json").select(list(range(args.start,args.end)))
+tokenized_dataset_eval = convert_cnn_dataset(tokenizer=tokenizer).select(list(range(args.start, args.end)))
 data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
-dataloader = DataLoader(tokenized_dataset_eval, batch_size=1, collate_fn=data_collator, shuffle=False)
+dataloader = DataLoader(tokenized_dataset_eval, batch_size=2, collate_fn=data_collator, shuffle=False)
 num_eval_steps = len(dataloader)
 for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     input_ids = batch['input_ids'][..., :128].to(DEVICE)
     labels = batch['labels'][..., :128]
     terminate = False
+    print(input_ids,labels)
     if labels[0][-1] == -100: continue
     prefix_len = input_ids.size(1)
     attention_mask = make_causal_mask((MAX_LEN, MAX_LEN), dtype=DTYPE, device=DEVICE)

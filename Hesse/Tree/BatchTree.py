@@ -20,15 +20,11 @@ class BatchSTree(BatchTree):
                  batch_size = 1,
                  grow_map = None,
                  attn_mask = None, 
-                 sequence = None, 
-                 new_tokens_buffer = None, 
-                 parents_buffer = None, 
                  position_ids = None,
                  sampling_callables = None,
                  sample_gather_indices = None) -> None:
         super().__init__(device=device, max_length=max_length, batch_size=batch_size)
         assert self.max_length == draft_model_engine.max_length
-        assert self.batch_size == draft_model_engine.bsz
         self.max_target_seq = max_target_seq
         self.draft_model_engine = draft_model_engine
         self.target_model_engine = target_model_engine
@@ -46,7 +42,7 @@ class BatchSTree(BatchTree):
         tree_mask = (tree_mask == 0).type(self.dtype)
         
         tree_mask.masked_fill_(tree_mask > 0, torch.finfo(self.dtype).min)
-        self.initialize(attn_mask, sequence, new_tokens_buffer, parents_buffer, position_ids, None)
+        self.initialize(attn_mask, position_ids, None)
         self.set_prefix(prefix=prefix)
         self.tree_size = self.grow_map["size"]
         self.tree_mask = tree_mask
@@ -54,15 +50,16 @@ class BatchSTree(BatchTree):
         self.full_attn_mask[self.max_length - self.tree_size + 1: self.max_length, self.max_length - self.tree_size + 1: self.max_length] = tree_mask[1:, 1:]
 
 
-        total_nodes = len(prefix) + self.tree_size - 1
+        total_nodes = prefix.size(1) + self.tree_size - 1
         self.attn_mask = self.full_attn_mask[self.max_length - total_nodes: 2 * self.max_length - total_nodes, self.max_length - total_nodes: 2 * self.max_length - total_nodes]
-        self.ground_truth_len = len(prefix)
+        self.ground_truth_len = prefix.size(1)
         
         self.position_ids[len(prefix) : len(prefix) + self.tree_size - 1] = (self.grow_map["depth"][1:].to(self.device) + len(prefix) - 1)
         self.storage_ids = torch.arange(self.max_length).to(self.device)
+        
         self.depth = self.grow_map["depth"][1:].to(self.device)
         
-        self.draft_logits = torch.zeros((self.max_length, vocab_size), dtype=self.dtype).to(self.device)
+        self.draft_logits = torch.zeros((self.batch_size, self.max_length, vocab_size), dtype=self.dtype).to(self.device)
         if draft_kv_len == 0:
             draft_model_outputs = self.draft_model_engine.forward(input_ids=self.tokens[:self.num_nodes].unsqueeze(0), 
                                 storage_ids=self.storage_ids[:self.num_nodes], 
@@ -220,8 +217,12 @@ class BatchSTree(BatchTree):
                 t4 = time.time()
                 return self.tokens[:accept_length], accept_length, accept_length, t2 - t1, t3-t2, t4 - t3, terminal
              return self.tokens[:accept_length], accept_length, accept_length, terminal
+    
+    
     def verbose(self):
         super().verbose()
+    
+    
     def construct_grow_map(self, benchmark = False):
         if benchmark:
             sample_time = 0

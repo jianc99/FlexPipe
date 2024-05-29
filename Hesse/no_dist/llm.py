@@ -205,14 +205,8 @@ class KV_Cache:
             layer_idx :int,
             storage_ids: torch.LongTensor
             ):
-        if len(storage_ids.shape)==1:
-            self.k_cache[layer_idx].index_copy_(dim=-2, index=storage_ids, source=new_k_cache)
-            self.v_cache[layer_idx].index_copy_(dim=-2, index=storage_ids, source=new_v_cache)
-        else:
-            for batch_idx in range(storage_ids.size(0)):
-                self.k_cache[layer_idx,batch_idx].index_copy_(dim=-2, index=storage_ids[batch_idx], source=new_k_cache)
-                self.v_cache[layer_idx,batch_idx].index_copy_(dim=-2, index=storage_ids[batch_idx], source=new_v_cache)
-        
+        self.k_cache[layer_idx].index_copy_(dim=-2, index=storage_ids, source=new_k_cache)
+        self.v_cache[layer_idx].index_copy_(dim=-2, index=storage_ids, source=new_v_cache)
         return self.k_cache[layer_idx], self.v_cache[layer_idx]
         
 

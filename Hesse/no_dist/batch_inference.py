@@ -20,11 +20,15 @@ parser.add_argument('--start', type=int, default=0, help='start')
 parser.add_argument('--end', type=int, default=200, help='end')
 parser.add_argument('--T', type=float, default=0.6, help='temperature')
 parser.add_argument('--P', type=float, default=0.9, help='top_p')
+parser.add_argument('--B', type=int, default=16, help='batch_size')
 parser.add_argument('--M', type=int, default=256, help='max length')
 parser.add_argument('--seed', type=int, default=123, help='random seed')
 args = parser.parse_args()
 print(args)
 setup_seed(args.seed)
+attn_mask = torch.full((16, 16), torch.finfo(torch.float16).min, dtype=torch.float16, device="cuda:0").repeat(2, 2)
+print(attn_mask.size())
+time.sleep(100)
 
 def simulation_fast(target_model : LLMEngine, draft_model: LLMEngine, dataloader: DataLoader, T=0.6, top_p=0.9, 
             max_length=512, grow_map=None, sampling_callables = None,
@@ -35,10 +39,7 @@ def simulation_fast(target_model : LLMEngine, draft_model: LLMEngine, dataloader
     total_time = 0.0
     dtype = torch.float16
     attn_mask = torch.full((max_length, max_length), torch.finfo(dtype).min, dtype=dtype, device=DEVICE)
-    sequence = torch.tensor(list(range(max_length)), device=DEVICE).long().unsqueeze(-1)
-    new_tokens_buffer =  torch.zeros(max_length).long().to(DEVICE)
-    parents_buffer =  torch.zeros(max_length).long().to(DEVICE)
-    position_ids = torch.zeros(max_length).long().to(DEVICE)
+    position_ids = torch.zeros(BATCH_SIZE,max_length).long().to(DEVICE)
     
     with torch.no_grad():
         for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
@@ -53,8 +54,7 @@ def simulation_fast(target_model : LLMEngine, draft_model: LLMEngine, dataloader
                                     top_p=top_p,
                                     draft_kv_len=draft_kv_len, target_kv_len=target_kv_len,
                                     draft_model_engine=draft_model, target_model_engine=target_model, max_length=max_length, grow_map=grow_map,
-                                    attn_mask = attn_mask, sequence = sequence, new_tokens_buffer = new_tokens_buffer, 
-                                    parents_buffer = parents_buffer, 
+                                    attn_mask = attn_mask,
                                     position_ids = position_ids,
                                     sampling_callables=sampling_callables,
                                     sample_gather_indices = sample_gather_indices)
@@ -82,13 +82,14 @@ tokenizer.pad_token = tokenizer.eos_token
 tokenized_dataset_eval = convert_cnn_dataset(tokenizer=tokenizer).select(list(range(args.start, args.end)))
 tokenizer.pad_token = tokenizer.eos_token
 data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
-dataloader = DataLoader(tokenized_dataset_eval, batch_size=1, collate_fn=data_collator, shuffle=False)
+dataloader = DataLoader(tokenized_dataset_eval, batch_size=args.B, collate_fn=data_collator, shuffle=False)
 
 MAX_LEN = args.M
 TARGET_MODEL_NAME = args.target
 DRAFT_MODEL_NAME = args.model
 DTYPE = torch.float16
 DEVICE = torch.device("cuda", 0)
+BATCH_SIZE = args.B
 torch.cuda.set_device(DEVICE)
 
 path = args.growmap
@@ -122,8 +123,8 @@ cg_list_draft.append(1)
 
 print(sample_gather_indices)
 
-# draft_model =  LLMEngine(max_length=MAX_LEN, model_name=DRAFT_MODEL_NAME, device=DEVICE)
-# target_model = LLMEngine(max_length=MAX_LEN, model_name=TARGET_MODEL_NAME, device=DEVICE)
+draft_model =  LLMEngine(max_length=MAX_LEN, model_name=DRAFT_MODEL_NAME, device=DEVICE, batch_size=args.B)
+target_model = LLMEngine(max_length=MAX_LEN, model_name=TARGET_MODEL_NAME, device=DEVICE, batch_size=args.B)
 
 # draft_model.initialize_cuda_graph(cg_list_draft)
 # target_model.initialize_cuda_graph(cg_list_target)

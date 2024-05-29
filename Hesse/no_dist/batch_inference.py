@@ -2,6 +2,8 @@ from llm import LLMEngine
 import argparse
 import time
 import torch
+import sys
+sys.path.append("..")
 from transformers import DataCollatorForLanguageModeling, AutoTokenizer
 from Hesse.Tree.BatchTree import BatchSTree
 from torch.utils.data.dataloader import DataLoader
@@ -76,6 +78,7 @@ def simulation_fast(target_model : LLMEngine, draft_model: LLMEngine, dataloader
     return num_decoding_steps / num_large_model_steps
 
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf", use_fast=False)
+tokenizer.pad_token = tokenizer.eos_token
 tokenized_dataset_eval = convert_cnn_dataset(tokenizer=tokenizer).select(list(range(args.start, args.end)))
 tokenizer.pad_token = tokenizer.eos_token
 data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
@@ -117,12 +120,14 @@ cg_list_target = [tree_size]
 cg_list_draft = [sum(x) for x in branch_lists]
 cg_list_draft.append(1)
 
-draft_model =  LLMEngine(max_length=MAX_LEN, model_name=DRAFT_MODEL_NAME, device=DEVICE)
-target_model = LLMEngine(max_length=MAX_LEN, model_name=TARGET_MODEL_NAME, device=DEVICE)
+print(sample_gather_indices)
 
-draft_model.initialize_cuda_graph(cg_list_draft)
-target_model.initialize_cuda_graph(cg_list_target)
+# draft_model =  LLMEngine(max_length=MAX_LEN, model_name=DRAFT_MODEL_NAME, device=DEVICE)
+# target_model = LLMEngine(max_length=MAX_LEN, model_name=TARGET_MODEL_NAME, device=DEVICE)
 
-simulation_fast(target_model=target_model, draft_model=draft_model, dataloader=dataloader, T=args.T, top_p=args.P,
-                                     max_length=args.M, grow_map = grow_map, sampling_callables=sampling_callables, sample_gather_indices = sample_gather_indices)
+# draft_model.initialize_cuda_graph(cg_list_draft)
+# target_model.initialize_cuda_graph(cg_list_target)
+
+# simulation_fast(target_model=target_model, draft_model=draft_model, dataloader=dataloader, T=args.T, top_p=args.P,
+#                                      max_length=args.M, grow_map = grow_map, sampling_callables=sampling_callables, sample_gather_indices = sample_gather_indices)
 

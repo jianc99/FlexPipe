@@ -4,13 +4,10 @@ from .Tree import BatchTree
 import time
 from Hesse.Engine.pipleline import LLM_Pipeline
 from .utils import get_sampling_logits, ChildrenAccept
-
 class BatchSTree(BatchTree):
     def __init__(self, 
                  draft_model_engine :LLM_Pipeline,
                  target_model_engine :LLM_Pipeline,
-                #  draft_model_engine,
-                #  target_model_engine,
                  prefix :torch.LongTensor,
                  temperature :float = 0.6,
                  top_p: float = 0.9,
@@ -31,6 +28,7 @@ class BatchSTree(BatchTree):
                  sample_gather_indices = None) -> None:
         super().__init__(device=device, max_length=max_length, batch_size=batch_size)
         assert self.max_length == draft_model_engine.max_length
+        assert self.batch_size == draft_model_engine.bsz
         self.max_target_seq = max_target_seq
         self.draft_model_engine = draft_model_engine
         self.target_model_engine = target_model_engine
@@ -70,14 +68,14 @@ class BatchSTree(BatchTree):
                                 storage_ids=self.storage_ids[:self.num_nodes], 
                                 position_ids=self.position_ids[:self.num_nodes].unsqueeze(0),
                                 attention_mask=self.attn_mask[:self.num_nodes][None, None, :, :])
-            self.draft_logits[0] = draft_model_outputs[...,-1,:][0]
+            self.draft_logits = draft_model_outputs[...,-1,:]
         
         else:
             draft_model_outputs = self.draft_model_engine.forward(input_ids = self.tokens[draft_kv_len: self.num_nodes].unsqueeze(0), 
                                                     storage_ids=self.storage_ids[draft_kv_len: self.num_nodes],
                                                     position_ids=self.position_ids[draft_kv_len: self.num_nodes].unsqueeze(0),
                                                     attention_mask=self.attn_mask[draft_kv_len: self.num_nodes][None, None, :, :])
-            self.draft_logits[0] = draft_model_outputs[...,-1,:][0]
+            self.draft_logits= draft_model_outputs[...,-1,:]
         self.draft_kv_len = self.num_nodes
         
         self.target_kv_len = target_kv_len
@@ -92,16 +90,13 @@ class BatchSTree(BatchTree):
             x2 = 0.0
         
         total_branch = sum(n_branch_list)
-        max_branch = max(n_branch_list)
-
+        
         if benchmark:
                 torch.cuda.synchronize()
                 t1 = time.time()
-        new_tokens_set = self.sampling_callables[grow_step](self.draft_logits[idx_list])
-        # num_samples = max_branch
-        # new_tokens_set = self.draft_logits[idx_list].topk(k=num_samples).indices.flatten()
-
-        self.tokens[self.num_nodes: self.num_nodes + total_branch] = new_tokens_set[self.sample_gather_indices[grow_step]]
+        for i in range(self.batch_size):
+            new_tokens_set = self.sampling_callables[grow_step](self.draft_logits[i, idx_list])
+            self.tokens[i, self.num_nodes[i]: self.num_nodes[i] + total_branch] = new_tokens_set[self.sample_gather_indices[grow_step]]
             
         if benchmark:
                     torch.cuda.synchronize()
@@ -111,6 +106,7 @@ class BatchSTree(BatchTree):
         
         start_pos = self.num_nodes - total_branch
         end_pos = self.num_nodes
+
         attn_mask = self.attn_mask[self.num_nodes - total_branch: self.num_nodes]
         attn_mask = attn_mask[None, None, :, :]
         
@@ -150,6 +146,7 @@ class BatchSTree(BatchTree):
         
     @torch.inference_mode()
     def verify(self, benchmark = False):
+        # Inference to get the target tokens
         new_node_num = (self.num_nodes - self.ground_truth_len + 1)
         if self.target_kv_len == 0:
             start_pos = 0
@@ -188,6 +185,7 @@ class BatchSTree(BatchTree):
         self.target_token = self.target_logits.multinomial(num_samples=1)
         accept_list = self.seq_to_use[:self.ground_truth_len]
         
+        # Compare the target token with draft tokens
         terminal = False
         while True:
             parent_id = accept_list[-1]
@@ -263,4 +261,3 @@ class BatchSTree(BatchTree):
         self.draft_logits[0] = draft_model_outputs[...,-1,:][0]
         self.draft_kv_len = self.num_nodes
         self.target_kv_len = len(accept_list)
-    

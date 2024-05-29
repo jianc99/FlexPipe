@@ -31,6 +31,16 @@ def sampling_argmax(
         num_samples: int):
         return sampling_logits.topk(k=num_samples).indices.flatten()
 
+def sampling_argmax_batch(
+        sampling_logits: torch.Tensor, 
+        num_samples: int):
+        batch_size, seq_len, voc_size = sampling_logits.size()
+        reshaped_logits = sampling_logits.view(-1, voc_size)
+        sampled_tokens = reshaped_logits.topk(k=num_samples).indices
+        sampled_indices = sampled_tokens.view(batch_size, -1)
+        return sampled_indices
+
+
 def expand_kv(kv_cache, k):
     kv_shape = kv_cache[0][0].shape
     new_kv_cache = ()
@@ -200,6 +210,40 @@ def cuda_graph_for_sampling_argmax(
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph, pool=mempool):
         static_position = sampling_argmax(
+                 static_sampling_logits,
+                 num_samples
+            )
+    def run(draft_logits):
+        static_sampling_logits.copy_(draft_logits)
+        graph.replay()
+        return static_position.clone()
+    
+    return run
+
+def cuda_graph_for_sampling_argmax_batch(
+                device="cuda:0", dtype=torch.float16, 
+                dim=32000, max_length=384, 
+                n_warmups=3, mempool=None,
+                idx_len = 8, num_samples = 16,
+                temperature = 0.6, tree_size = 64, batch_size=1):
+    
+    static_sampling_logits = torch.full((batch_size, idx_len, dim), 1, dtype=dtype, device=device)
+    
+
+    s = torch.cuda.Stream()
+    s.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(s):
+        for _ in range(n_warmups):
+            static_position = sampling_argmax_batch(
+                 static_sampling_logits,
+                 num_samples
+            )
+        s.synchronize()
+    torch.cuda.current_stream().wait_stream(s)
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, pool=mempool):
+        static_position = sampling_argmax_batch(
                  static_sampling_logits,
                  num_samples
             )

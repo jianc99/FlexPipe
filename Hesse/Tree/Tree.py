@@ -52,15 +52,15 @@ class Tree:
         print(self.tokens)
         print(self.Successors)
 
-
 class BatchTree:
-    def __init__(self, device :str = 'cpu', max_length = 512, dtype = torch.float16, batch_size=1) -> None:
-        self.tokens = torch.zeros(batch_size,max_length, device=device).long()
+    def __init__(self, device :str = 'cpu', max_length = 512, dtype = torch.float16, batch_size = 1) -> None:
+        self.tokens = torch.zeros(batch_size, max_length, device=device).long()
         self.Successors :list[list[int]] = []
         self.num_nodes = torch.zeros(batch_size)
         self.device = device
         self.max_length = max_length
         self.dtype = dtype
+        self.batch_size = batch_size
 
 
     def initialize(self, attn_mask, sequence, new_tokens_buffer, parents_buffer, position_ids, active_mark):

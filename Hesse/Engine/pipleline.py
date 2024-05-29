@@ -46,6 +46,8 @@ class LLM_Pipeline:
 
 
     def forward(self,input_ids, position_ids, attention_mask, storage_ids):
+        # if dist.get_rank()==0:
+        #     print(input_ids.size(), dist.get_world_size(self.global_group))
         if self.pp_config == None:
             output = torch.full((input_ids.size(0), input_ids.size(1), 32000), 0, dtype=torch.float32, device=input_ids.device)
             dist.broadcast(output, self.last_stage_rank_0)

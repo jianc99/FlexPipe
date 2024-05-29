@@ -70,80 +70,72 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
     
-# def capture_cuda_graph_for_pos_emb(
-#     bsz: int,
-#     q_len: int,
-#     num_head: int,
-#     num_kv_head: int,
-#     head_dim:int,
-#     max_len: int,
-#     dtype= torch.float16,
-#     device= "cuda:0",
-#     n_warmups=3, mempool=None
-# ):
-#     static_q = torch.zeros((bsz, num_head, q_len, head_dim), dtype=dtype, device=device)
-#     static_k = torch.zeros((bsz, num_kv_head, q_len, head_dim), dtype=dtype, device=device)
-#     static_sin = torch.zeros((max_len, head_dim), dtype=dtype, device=device)
-#     static_cos = torch.zeros((max_len, head_dim), dtype=dtype, device=device)
-#     static_pos = torch.zeros((bsz, q_len), dtype=torch.int32, device=device)
-#     s = torch.cuda.Stream()
-#     s.wait_stream(torch.cuda.current_stream())
-#     with torch.cuda.stream(s):
-#         for _ in range(n_warmups):
-#             new_q, new_k = apply_rotary_pos_emb(
-#                     static_q,
-#                     static_k,
-#                     static_cos,
-#                     static_sin,
-#                     static_pos
-#                     )
-#         s.synchronize()
-#     torch.cuda.current_stream().wait_stream(s)
+def capture_cuda_graph_for_pos_emb(
+    bsz: int,
+    q_len: int,
+    num_head: int,
+    num_kv_head: int,
+    head_dim:int,
+    max_len: int,
+    dtype= torch.float16,
+    device= "cuda:0",
+    n_warmups=3, mempool=None
+):
+    static_q = torch.zeros((bsz, num_head, q_len, head_dim), dtype=dtype, device=device)
+    static_k = torch.zeros((bsz, num_kv_head, q_len, head_dim), dtype=dtype, device=device)
+    static_sin = torch.zeros((max_len, head_dim), dtype=dtype, device=device)
+    static_cos = torch.zeros((max_len, head_dim), dtype=dtype, device=device)
+    static_pos = torch.zeros((bsz, q_len), dtype=torch.int32, device=device)
+    s = torch.cuda.Stream()
+    s.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(s):
+        for _ in range(n_warmups):
+            new_q, new_k = apply_rotary_pos_emb(
+                    static_q,
+                    static_k,
+                    static_cos,
+                    static_sin,
+                    static_pos
+                    )
+        s.synchronize()
+    torch.cuda.current_stream().wait_stream(s)
 
-#     graph = torch.cuda.CUDAGraph()
-#     with torch.cuda.graph(graph, pool=mempool):
-#          new_q, new_k = apply_rotary_pos_emb(
-#                     static_q,
-#                     static_k,
-#                     static_cos,
-#                     static_sin,
-#                     static_pos
-#                     )
-#     def run(q, k, cos, sin, pos):
-#         static_q.copy_(q)
-#         static_k.copy_(k)
-#         static_cos.copy_(cos)
-#         static_sin.copy_(sin)
-#         static_pos.copy_(pos)
-#         graph.replay()
-#         return new_q.clone(), new_k.clone()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, pool=mempool):
+         new_q, new_k = apply_rotary_pos_emb(
+                    static_q,
+                    static_k,
+                    static_cos,
+                    static_sin,
+                    static_pos
+                    )
+    def run(q, k, cos, sin, pos):
+        static_q.copy_(q)
+        static_k.copy_(k)
+        static_cos.copy_(cos)
+        static_sin.copy_(sin)
+        static_pos.copy_(pos)
+        graph.replay()
+        return new_q.clone(), new_k.clone()
     
-#     return run
+    return run
 
 class KV_Cache:
 
     def __init__(self, 
         config :LlamaConfig,
-        pp_config :dict,
         batch_size :int = 1,
         max_length :int = 256, 
         device :str = 'cuda:0',
         dtype = torch.float16) -> None:
-
         self.config = config
-        self.pp_config = pp_config
-        self.process_group = self.pp_config["current_group"]
-
         self.max_length = max_length
         self.device = device
         self.dtype = dtype
-        self.world_size = dist.get_world_size(self.process_group)
-        self.num_layers = len(self.pp_config["current_layers"])
-
         self.k_cache = torch.zeros(
-            self.num_layers,
+            config.num_hidden_layers,
             batch_size,
-            config.num_key_value_heads // self.world_size,
+            config.num_key_value_heads,
             max_length,
             config.hidden_size // config.num_attention_heads,
             device=self.device,
@@ -151,14 +143,15 @@ class KV_Cache:
         )
 
         self.v_cache = torch.zeros(
-            self.num_layers,
+            config.num_hidden_layers,
             batch_size,
-            config.num_key_value_heads // self.world_size,
+            config.num_key_value_heads,
             max_length,
             config.hidden_size // config.num_attention_heads,
             device=self.device,
             dtype=self.dtype
         )
+        self.num_layers = config.num_hidden_layers
         self.kv_offset = 0
 
     def initialize_kv(self,
@@ -192,6 +185,17 @@ class KV_Cache:
         self.v_cache[..., offset + len(indices):, :] = 0.0
 
         self.kv_offset = offset + len(indices)
+    
+    def gather_kv_incremental_batch(self, indices: list[list[int]], offset:list[int]):
+
+        for batch_idx in range(len(offset)):
+            self.k_cache[:, batch_idx, :, offset:offset + len(indices), :] = self.k_cache[..., indices, :]
+            self.v_cache[:, batch_idx, :, offset:offset + len(indices), :] = self.v_cache[..., indices, :]
+
+            self.k_cache[:, batch_idx, :, offset + len(indices):, :] = 0.0
+            self.v_cache[:, batch_idx, :, len(indices):, :] = 0.0
+
+            # self.kv_offset = offset + len(indices)
 
 
     
@@ -201,9 +205,13 @@ class KV_Cache:
             layer_idx :int,
             storage_ids: torch.LongTensor
             ):
-        
-        self.k_cache[layer_idx].index_copy_(dim=-2, index=storage_ids, source=new_k_cache)
-        self.v_cache[layer_idx].index_copy_(dim=-2, index=storage_ids, source=new_v_cache)
+        if len(storage_ids.shape)==1:
+            self.k_cache[layer_idx].index_copy_(dim=-2, index=storage_ids, source=new_k_cache)
+            self.v_cache[layer_idx].index_copy_(dim=-2, index=storage_ids, source=new_v_cache)
+        else:
+            for batch_idx in range(storage_ids.size(0)):
+                self.k_cache[layer_idx,batch_idx].index_copy_(dim=-2, index=storage_ids[batch_idx], source=new_k_cache)
+                self.v_cache[layer_idx,batch_idx].index_copy_(dim=-2, index=storage_ids[batch_idx], source=new_v_cache)
         
         return self.k_cache[layer_idx], self.v_cache[layer_idx]
         
@@ -235,7 +243,7 @@ def layer_norm(
     return hidden_states
 
 class LLMLayer:
-    def __init__(self, layer_idx, config: LlamaConfig, pp_config: dict) -> None:
+    def __init__(self, layer_idx) -> None:
         
         self.wq :torch.Tensor = None
         self.wk :torch.Tensor = None
@@ -255,47 +263,18 @@ class LLMLayer:
         self.cos_cache :torch.Tensor = None
         self.sin_cache :torch.Tensor = None
 
-        self.pp_config = pp_config
-        self.process_group = self.pp_config["current_group"]
-
         self.layer_idx = layer_idx
-        self.rank = dist.get_rank(self.process_group)
-        self.world_size = dist.get_world_size(self.process_group)
-
-        self.hidden_size = config.hidden_size
-        self.num_heads = config.num_attention_heads
-        self.head_dim = self.hidden_size // self.num_heads
-        self.num_key_value_heads = config.num_key_value_heads
-        self.num_key_value_groups = self.num_heads // self.num_key_value_heads
-        self.key_value_slicing = (self.num_key_value_heads * self.head_dim) // self.world_size
-
-        self.intermediate_size = config.intermediate_size
-        self.mlp_slice = self.intermediate_size // self.world_size
     
     def init_parameters(self, hf_layer: LlamaDecoderLayer):
 
         self.wq :torch.Tensor= hf_layer.self_attn.q_proj.weight.detach()
-        self.wq :torch.Tensor= self.wq.split((self.num_heads * self.head_dim) // self.world_size, dim=0)[self.rank]
-
         self.wk :torch.Tensor= hf_layer.self_attn.k_proj.weight.detach()
-        self.wk :torch.Tensor= self.wk.split(self.key_value_slicing, dim=0)[self.rank]
-
         self.wv :torch.Tensor= hf_layer.self_attn.v_proj.weight.detach()
-        self.wv :torch.Tensor= self.wv.split(self.key_value_slicing, dim=0)[self.rank]
-
         self.wo :torch.Tensor= hf_layer.self_attn.o_proj.weight.detach()
-        self.wo :torch.Tensor=self.wo.split(self.hidden_size // self.world_size, dim=1)[self.rank]
 
-        
-
-        self.gate_proj :torch.Tensor= hf_layer.mlp.gate_proj.weight.detach()
-        self.gate_proj :torch.Tensor = self.gate_proj.split(self.mlp_slice, dim=0)[self.rank]
-
-        self.up_proj :torch.Tensor= hf_layer.mlp.up_proj.weight.detach()
-        self.up_proj :torch.Tensor= self.up_proj.split(self.mlp_slice, dim=0)[self.rank]
-
-        self.down_proj :torch.Tensor= hf_layer.mlp.down_proj.weight.detach()
-        self.down_proj :torch.Tensor= self.down_proj.split(self.mlp_slice, dim=1)[self.rank]
+        self.gate_proj = hf_layer.mlp.gate_proj.weight.detach()
+        self.up_proj = hf_layer.mlp.up_proj.weight.detach()
+        self.down_proj = hf_layer.mlp.down_proj.weight.detach()
 
         self.input_layernorm_weight = hf_layer.input_layernorm.weight
         self.input_layernorm_variance_epsilon = hf_layer.input_layernorm.variance_epsilon
@@ -323,27 +302,18 @@ class LLMLayer:
 class LLM:
     def __init__(self, 
         model_name: str,
-        pp_config : dict,
         batch_size :int = 1,
         max_length :int = 256, 
         device :str = 'cuda:0',
         dtype = torch.float16) -> None:
-        self.pp_config = pp_config
-        self.process_group = self.pp_config["current_group"]
-        self.global_group = self.pp_config["global_group"]
-        self.rank = dist.get_rank(self.process_group)
-        self.world_size = dist.get_world_size(self.process_group)
-        self.is_first_stage = (self.pp_config["current_stage"] == 0)
-        self.is_last_stage = (self.pp_config["current_stage"] == self.pp_config["num_stages"] -1 )
-        self.current_layers = self.pp_config["current_layers"]
-
+        
         self.batch_size = batch_size
         self.device = device
         self.dtype = dtype
         self.config = LlamaConfig.from_pretrained(model_name)
         self.model_name = model_name
         self.max_length = max_length
-        self.kv_cache = KV_Cache(self.config, self.pp_config, max_length=max_length, device=device, dtype=dtype, batch_size=self.batch_size)
+        self.kv_cache = KV_Cache(self.config, max_length=max_length, device=device, dtype=dtype, batch_size=self.batch_size)
         self.init_parameters()
         self.hidden_size = self.config.hidden_size
         self.num_heads = self.config.num_attention_heads
@@ -356,54 +326,48 @@ class LLM:
         self.mempool = None
 
     def init_parameters(self):
-        for rank in range(self.world_size):
-            if self.rank == rank:
-                hf_model = LlamaForCausalLM.from_pretrained(self.model_name, torch_dtype=self.dtype)
-                if self.is_first_stage:
-                    self.embed_tokens = hf_model.model.embed_tokens.weight.detach().to(self.device)
 
-                if self.is_last_stage:
-                    self.lm_head = hf_model.lm_head.weight.detach().to(self.device)
-                    self.norm_weight = hf_model.model.norm.weight.detach().to(self.device)
-                    self.norm_variance_epsilon = hf_model.model.norm.variance_epsilon
+        hf_model = LlamaForCausalLM.from_pretrained(self.model_name, torch_dtype=self.dtype)
+        self.embed_tokens = hf_model.model.embed_tokens.weight.detach().to(self.device)
+        self.lm_head = hf_model.lm_head.weight.detach().to(self.device)
 
-                self.cos_cache = hf_model.model.layers[0].self_attn.rotary_emb.cos_cached.to(self.device)[:self.max_length].to(self.dtype)
-                self.sin_cache = hf_model.model.layers[0].self_attn.rotary_emb.sin_cached.to(self.device)[:self.max_length].to(self.dtype)
-                self.layers :list[LLMLayer] = []
-                
-                for idx in self.current_layers:
-                    hf_layer = hf_model.model.layers[idx]
-                    layer = LLMLayer(idx, self.config, self.pp_config)
-                    layer.init_parameters(hf_layer=hf_layer)
-                    layer.init_gpu(self.device)
-                    self.layers.append(layer)
-                    hf_model.model.layers[idx] = None
-                    gc.collect()
-                    
-                self.num_layers = len(self.layers)
-            dist.barrier(self.global_group) 
+        self.norm_weight = hf_model.model.norm.weight.detach().to(self.device)
+        self.norm_variance_epsilon = hf_model.model.norm.variance_epsilon
 
-    # @torch.inference_mode()
-    # def initialize_cuda_graph(self, 
-    #         decoding_seqlens :List[int],
-    #         n_warmups=3):
-    #     gc.collect()
-    #     self.mempool = torch.cuda.graphs.graph_pool_handle()
-    #     for decoding_seqlen in decoding_seqlens:
-    #         if decoding_seqlen not in self.rope_callables and decoding_seqlen !=0:
-    #             self.rope_callables[decoding_seqlen] = capture_cuda_graph_for_pos_emb(
-    #                 bsz = self.batch_size,
-    #                 q_len = decoding_seqlen,
-    #                 num_head=self.num_heads,
-    #                 num_kv_head=self.num_key_value_heads,
-    #                 head_dim=self.head_dim,
-    #                 max_len=self.max_length,
-    #                 dtype=self.dtype,
-    #                 device=self.device,
-    #                 n_warmups=n_warmups,
-    #                 mempool=self.mempool
-    #             )
+        self.cos_cache = hf_model.model.layers[0].self_attn.rotary_emb.cos_cached.to(self.device)[:self.max_length].to(self.dtype)
+        self.sin_cache = hf_model.model.layers[0].self_attn.rotary_emb.sin_cached.to(self.device)[:self.max_length].to(self.dtype)
+        self.layers :list[LLMLayer] = []
+        
+        for idx, hf_layer in enumerate(hf_model.model.layers):
+            layer = LLMLayer(idx)
+            layer.init_parameters(hf_layer=hf_layer)
+            layer.init_gpu(self.device)
+            self.layers.append(layer)
+            hf_model.model.layers[idx] = None
+            gc.collect()
+            
+        self.num_layers = len(self.layers)
 
+    @torch.inference_mode()
+    def initialize_cuda_graph(self, 
+            decoding_seqlens :List[int],
+            n_warmups=3):
+        gc.collect()
+        self.mempool = torch.cuda.graphs.graph_pool_handle()
+        for decoding_seqlen in decoding_seqlens:
+            if decoding_seqlen not in self.rope_callables and decoding_seqlen !=0:
+                self.rope_callables[decoding_seqlen] = capture_cuda_graph_for_pos_emb(
+                    bsz = self.batch_size,
+                    q_len = decoding_seqlen,
+                    num_head=self.num_heads,
+                    num_kv_head=self.num_key_value_heads,
+                    head_dim=self.head_dim,
+                    max_len=self.max_length,
+                    dtype=self.dtype,
+                    device=self.device,
+                    n_warmups=n_warmups,
+                    mempool=self.mempool
+                )
     def pre_attention_compute(
         self,
         hidden_states: torch.Tensor,
@@ -421,11 +385,10 @@ class LLM:
         query_states = F.linear(hidden_states, wq)
         key_states = F.linear(hidden_states, wk)
         value_states = F.linear(hidden_states, wv)
-        query_states = query_states.view(bsz, q_len, num_heads // self.world_size, head_dim).transpose(1, 2)
-        key_states = key_states.view(bsz, q_len, num_key_value_heads // self.world_size, head_dim).transpose(1, 2)
-        value_states = value_states.view(bsz, q_len, num_key_value_heads // self.world_size, head_dim).transpose(1, 2)
+        query_states = query_states.view(bsz, q_len, num_heads, head_dim).transpose(1, 2)
+        key_states = key_states.view(bsz, q_len, num_key_value_heads, head_dim).transpose(1, 2)
+        value_states = value_states.view(bsz, q_len, num_key_value_heads, head_dim).transpose(1, 2)
         return query_states, key_states, value_states
-    
     def post_attention_compute(
         self,
         attn_output: torch.Tensor,
@@ -437,8 +400,10 @@ class LLM:
         up_proj: torch.Tensor,
         down_proj: torch.Tensor,
     ):  
+    
+    
         hidden_states = F.linear(attn_output, wo)
-        dist.all_reduce(hidden_states, dist.ReduceOp.SUM, self.process_group)
+            
         hidden_states = residual + hidden_states
         residual = hidden_states
         hidden_states = layer_norm(hidden_states, post_attention_layernorm_variance_epsilon, post_attention_layernorm_weight)
@@ -447,10 +412,8 @@ class LLM:
         gate = F.silu(gate)
         hidden_states = gate * up
         hidden_states = F.linear(hidden_states, down_proj)
-        dist.all_reduce(hidden_states, dist.ReduceOp.SUM, self.process_group)
         hidden_states = residual + hidden_states
         return hidden_states
-    
     @torch.inference_mode()
     def layer_compute(self, 
             buffer: LLMLayer,
@@ -477,16 +440,20 @@ class LLM:
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, self.cos_cache, self.sin_cache, position_ids)
         key_states, value_states = self.kv_cache.update_kv_cache(key_states, value_states, layer_idx, storage_ids)
 
-        key_states = repeat_kv(key_states, self.num_key_value_groups)
-        value_states = repeat_kv(value_states, self.num_key_value_groups)
+        query_states = query_states.reshape(self.batch_size, self.num_key_value_heads, q_len * self.num_key_value_groups, self.head_dim)
         
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+
+        attention_mask = attention_mask.repeat(1, 1, self.num_key_value_groups, 1)
+        
         attn_weights = attn_weights + attention_mask
         
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
         hidden_states = torch.matmul(attn_weights, value_states)
+        
+        hidden_states = hidden_states.reshape(bsz, self.num_heads, q_len, -1)
         hidden_states = hidden_states.transpose(1, 2).contiguous()
-        hidden_states = hidden_states.reshape(bsz, q_len, self.hidden_size // self.world_size)
+        hidden_states = hidden_states.reshape(bsz, q_len, self.hidden_size)
         
         hidden_states = self.post_attention_compute(
                         hidden_states, residual,
@@ -507,21 +474,18 @@ class LLM:
             position_ids: torch.LongTensor,
             attention_mask: torch.FloatTensor,
             storage_ids: torch.LongTensor):
-        if self.is_first_stage:
-            hidden_states = F.embedding(input_ids, self.embed_tokens)
-        else:
-            hidden_states=input_ids
+        
+        hidden_states = F.embedding(input_ids, self.embed_tokens)
+       
         for idx in range(self.num_layers):
-            hidden_states = self.layer_compute(self.layers[idx], idx, hidden_states, position_ids, attention_mask, storage_ids)
-        if self.is_last_stage:
-            input_dtype = hidden_states.dtype
-            hidden_states = hidden_states.to(torch.float32)
-            variance = hidden_states.pow(2).mean(-1, keepdim=True)
-            hidden_states = hidden_states * torch.rsqrt(variance + self.norm_variance_epsilon)
-            hidden_states = self.norm_weight * hidden_states.to(input_dtype)
-            logits = F.linear(hidden_states, self.lm_head).float()
-        else: 
-            return hidden_states
+                hidden_states = self.layer_compute(self.layers[idx], idx, hidden_states, position_ids, attention_mask, storage_ids)
+        
+        input_dtype = hidden_states.dtype
+        hidden_states = hidden_states.to(torch.float32)
+        variance = hidden_states.pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.norm_variance_epsilon)
+        hidden_states = self.norm_weight * hidden_states.to(input_dtype)
+        logits = F.linear(hidden_states, self.lm_head).float()
         return logits
 
     
@@ -531,21 +495,16 @@ def capture_graph(
     device = llm.device
     dtype = llm.dtype
     bsz = llm.batch_size
-    hidden_dim = llm.hidden_size
-    is_first_stage = llm.is_first_stage
     static_input_ids = torch.full((bsz, decoding_seqlen), 0, dtype=torch.long, device=device)
     static_position_ids = torch.full((bsz, decoding_seqlen), 0, dtype=torch.long, device=device)
-    static_storage_ids = torch.arange(decoding_seqlen, dtype=torch.long, device=device)
+    static_storage_ids = torch.arange(decoding_seqlen, dtype=torch.long, device=device).repeat(bsz, 1)
     static_attn_mask = torch.full((decoding_seqlen, llm.max_length), 0, dtype=dtype, device=device)
     static_attn_mask = static_attn_mask[None, None, :, :]
-    static_hidden_state = torch.full((bsz, decoding_seqlen, hidden_dim), 0, dtype=dtype, device=device)
-    if not is_first_stage: 
-        static_input_ids = static_hidden_state
     s = torch.cuda.Stream()
     s.wait_stream(torch.cuda.current_stream())
     with torch.cuda.stream(s):
         for _ in range(n_warmups):
-            static_output = llm.inference(
+            static_logits = llm.inference(
                     input_ids=static_input_ids, 
                     position_ids=static_position_ids, 
                     attention_mask=static_attn_mask,
@@ -553,10 +512,10 @@ def capture_graph(
                     )
         s.synchronize()
     torch.cuda.current_stream().wait_stream(s)
-    sleep(1)
+
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph, pool=mempool):
-        static_output = llm.inference(
+        static_logits = llm.inference(
                 input_ids=static_input_ids,  
                 position_ids=static_position_ids, 
                 attention_mask=static_attn_mask,
@@ -568,7 +527,7 @@ def capture_graph(
         static_position_ids.copy_(position_ids)
         static_attn_mask.copy_(attention_mask)
         graph.replay()
-        return static_output.clone()
+        return static_logits.clone()
     
     return run
 
@@ -576,18 +535,16 @@ def capture_graph(
 class LLMEngine:
     def __init__(self, 
                 model_name: str,
-                pp_config : dict,
                 batch_size :int = 1,
                 max_length :int = 256, 
                 device :str = 'cuda:0',
                 dtype = torch.float16) -> None:
         
-        self.llm = LLM(model_name, pp_config, batch_size, max_length, device, dtype)
+        self.llm = LLM(model_name, batch_size, max_length, device, dtype)
+        self.max_length = max_length
+        self.dtype = dtype
         self.callables = {}
         self.mempool = None
-        # self.pp_config = pp_config
-        # self.is_first_stage = (self.pp_config.current_stage == 0)
-        # self.is_last_stage = (self.pp_config.current_stage == self.pp_config.num_stages -1 )
 
     @torch.inference_mode()
     def initialize_cuda_graph(self, 
@@ -596,8 +553,6 @@ class LLMEngine:
         gc.collect()
         self.mempool = torch.cuda.graphs.graph_pool_handle()
         for decoding_seqlen in decoding_seqlens:
-            if decoding_seqlen == 0:
-                continue
             if decoding_seqlen not in self.callables:
                 self.callables[decoding_seqlen] = capture_graph(
                     llm=self.llm,
@@ -608,7 +563,7 @@ class LLMEngine:
         self.llm.kv_cache.clear()
 
     @torch.inference_mode()
-    def inference(self,
+    def forward(self,
             input_ids: torch.LongTensor, 
             storage_ids :torch.LongTensor,
             position_ids: Optional[torch.LongTensor] = None,
@@ -616,7 +571,14 @@ class LLMEngine:
             ):
             dec_length = input_ids.shape[1]
             if dec_length in self.callables.keys():
-                output = self.callables[dec_length](input_ids, storage_ids, position_ids, attention_mask)
+                logits = self.callables[dec_length](input_ids, storage_ids, position_ids, attention_mask)
             else:
-                output = self.llm.inference(input_ids, position_ids, attention_mask, storage_ids)
-            return output
+                logits = self.llm.inference(input_ids, position_ids, attention_mask, storage_ids)
+            return logits
+    
+    def gather_kv(self, indices: list[int]):
+        self.llm.kv_cache.gather_kv(indices)
+    def clear_kv(self):
+        self.llm.kv_cache.clear()
+    def gather_kv_incremental(self, indices: list[int], offset:int):
+        self.llm.kv_cache.gather_kv_incremental(indices, offset)

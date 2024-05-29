@@ -3,14 +3,11 @@ from torch.nn.functional import softmax
 from .Tree import Tree
 import time
 from Hesse.Engine.pipleline import LLM_Pipeline
-from .utils import get_sampling_logits, ChildrenAccept
-
-class GreedySTree(Tree):
+from utils import get_sampling_logits, ChildrenAccept, get_residual
+class SpecTree(Tree):
     def __init__(self, 
-                #  draft_model_engine :LLM_Pipeline,
-                #  target_model_engine :LLM_Pipeline,
-                 draft_model_engine,
-                 target_model_engine,
+                 draft_model_engine :LLM_Pipeline,
+                 target_model_engine :LLM_Pipeline,
                  prefix :torch.LongTensor,
                  temperature :float = 0.6,
                  top_p: float = 0.9,
@@ -26,6 +23,7 @@ class GreedySTree(Tree):
                  new_tokens_buffer = None, 
                  parents_buffer = None, 
                  position_ids = None,
+                 residual_graph = None,
                  sampling_callables = None,
                  sample_gather_indices = None) -> None:
         super().__init__(device=device, max_length=max_length)
@@ -35,6 +33,7 @@ class GreedySTree(Tree):
         self.target_model_engine = target_model_engine
         self.temperature = temperature
         self.top_p = top_p
+        self.residual_graph = residual_graph
         self.grow_map = grow_map
         self.sampling_callables = sampling_callables
         self.sample_gather_indices = sample_gather_indices
@@ -58,6 +57,7 @@ class GreedySTree(Tree):
         total_nodes = len(prefix) + self.tree_size - 1
         self.attn_mask = self.full_attn_mask[self.max_length - total_nodes: 2 * self.max_length - total_nodes, self.max_length - total_nodes: 2 * self.max_length - total_nodes]
         self.ground_truth_len = len(prefix)
+        self.r = torch.rand(len(position_ids), dtype=self.dtype).to(self.device)
         
         self.position_ids[len(prefix) : len(prefix) + self.tree_size - 1] = (self.grow_map["depth"][1:].to(self.device) + len(prefix) - 1)
         self.storage_ids = torch.arange(self.max_length).to(self.device)
@@ -80,33 +80,36 @@ class GreedySTree(Tree):
         self.draft_kv_len = self.num_nodes
         
         self.target_kv_len = target_kv_len
-    
+        
+        self.rand = torch.empty((self.tree_size, self.draft_logits.shape[1]), dtype=self.dtype).uniform_().to(self.device)
         self.seq_to_use = list(range(self.max_length))
     
     @torch.inference_mode()
-    def collective_grow_static(self, idx_list, n_branch_list :list[int], benchmark=False, grow_step = None):
+    def collective_grow_static(self, idx_list :list[int], n_branch_list :list[int], benchmark=False, grow_step = None):
         
         if benchmark:
             x1 = 0.0
             x2 = 0.0
         
+        
+        
+        
         total_branch = sum(n_branch_list)
-        max_branch = max(n_branch_list)
 
         if benchmark:
                 torch.cuda.synchronize()
                 t1 = time.time()
-        new_tokens_set = self.sampling_callables[grow_step](self.draft_logits[idx_list])
-        # num_samples = max_branch
-        # new_tokens_set = self.draft_logits[idx_list].topk(k=num_samples).indices.flatten()
 
+        new_tokens_set :torch.LongTensor = self.sampling_callables[grow_step](self.draft_logits[idx_list], self.rand[idx_list])
         self.tokens[self.num_nodes: self.num_nodes + total_branch] = new_tokens_set[self.sample_gather_indices[grow_step]]
-            
         if benchmark:
                     torch.cuda.synchronize()
                     t2 = time.time()
                     x1 += (t2 - t1)
+            
         self.num_nodes = self.num_nodes + total_branch
+        
+
         
         start_pos = self.num_nodes - total_branch
         end_pos = self.num_nodes
@@ -118,7 +121,6 @@ class GreedySTree(Tree):
             position_ids = self.position_ids[start_pos : end_pos].unsqueeze(0),
             attention_mask = attn_mask,
             storage_ids=self.storage_ids[self.draft_kv_len: self.num_nodes]
-            
         )
         self.draft_kv_len = self.num_nodes
         self.draft_logits[start_pos - self.ground_truth_len + 1:end_pos - self.ground_truth_len + 1] = draft_model_outputs[0][-total_branch:]
@@ -129,32 +131,38 @@ class GreedySTree(Tree):
         if benchmark:
             return n_branch_list, x1, x2
         return n_branch_list
+    
     @torch.inference_mode()
-    def accept_step(self, parent_id :int) ->ChildrenAccept:
+    def accept_step(self, parent_id :int):
         logits_id = parent_id - (self.ground_truth_len - 1)
+        p = self.target_logits[logits_id]
+        draft_logits = self.draft_logits[logits_id]
         
-        target_token = self.target_token[logits_id]
         children = self.Successors[logits_id]
         if len(children) == 0:
-            return -1
+            return (-1, p)
         
         for pos in children:
 
             token = self.tokens[pos + (self.ground_truth_len - 1)]
-            if token == target_token:
-                return pos + (self.ground_truth_len - 1)
-        
-        return -1
+            q = softmax(draft_logits / self.temperature, dim=-1)
+            r = self.r[pos + (self.ground_truth_len - 1)]
+            
+            if p[token] > r * q[token]:
+                return (pos + (self.ground_truth_len - 1), None)
+            else:
+                p = self.residual_graph(p, q)
+                draft_logits[token] = torch.finfo(self.dtype).min
+        return (-1, p)
 
-        
     @torch.inference_mode()
     def verify(self, benchmark = False):
         new_node_num = (self.num_nodes - self.ground_truth_len + 1)
         if self.target_kv_len == 0:
             start_pos = 0
             end_pos = self.num_nodes
-            attn_mask = self.attn_mask[start_pos: end_pos]
-            attn_mask = attn_mask[None, None, :, :]
+            attn_mask = self.attn_mask[start_pos: end_pos, :end_pos]
+            attn_mask = attn_mask[None, None, :, :].type(self.target_model_engine.dtype)
             if benchmark:
                 torch.cuda.synchronize()
                 t1 = time.time()
@@ -169,8 +177,8 @@ class GreedySTree(Tree):
         else:
             start_pos = self.target_kv_len
             end_pos = self.num_nodes
-            attn_mask = self.attn_mask[start_pos: end_pos]
-            attn_mask = attn_mask[None, None, :, :]
+            attn_mask = self.attn_mask[start_pos: end_pos, :end_pos]
+            attn_mask = attn_mask[None, None, :, :].type(self.target_model_engine.dtype)
             if benchmark:
                 torch.cuda.synchronize()
                 t1 = time.time()
@@ -182,31 +190,42 @@ class GreedySTree(Tree):
                 t2 = time.time()
             self.target_logits :torch.FloatTensor = target_model_outputs[0][-(new_node_num):]
         
+        assert len(self.target_logits) == (self.num_nodes - self.ground_truth_len + 1)
+
         self.target_logits = get_sampling_logits(logits=self.target_logits, top_p=self.top_p, T=self.temperature, replicate=False)
+        
         self.target_logits = softmax(self.target_logits / self.temperature, dim=-1)
-        self.target_token = self.target_logits.multinomial(num_samples=1)
+        
         accept_list = self.seq_to_use[:self.ground_truth_len]
         
         terminal = False
         while True:
             parent_id = accept_list[-1]
-            pos = self.accept_step(parent_id=parent_id)
+            pos, res = self.accept_step(parent_id=parent_id)
             if pos != -1:
                 accept_list.append(pos)
                 if self.tokens[pos] == 0 or self.tokens[pos] == 2:
                      terminal = True
                      break
             else:
+                residual = res
                 break
         if benchmark:
             torch.cuda.synchronize()
             t3 = time.time()
         accept_length = len(accept_list)
-        self.tokens[:accept_length] = self.tokens[accept_list]
         if not terminal:
-            self.tokens[accept_length] = self.target_token[accept_list[-1] - self.ground_truth_len + 1].reshape(1)
-            self.draft_model_engine.gather_kv_incremental(accept_list[self.ground_truth_len:], self.ground_truth_len)
-            self.target_model_engine.gather_kv_incremental(accept_list[self.ground_truth_len:], self.ground_truth_len)
+            if torch.isnan(residual).any():
+                 terminal = True
+            else:
+                self.tokens[accept_length] = residual.multinomial(num_samples=1, replacement=True)
+
+        self.tokens[:accept_length] = self.tokens[accept_list]
+
+        self.draft_model_engine.gather_kv_incremental(accept_list[self.ground_truth_len:], self.ground_truth_len)
+        self.target_model_engine.gather_kv_incremental(accept_list[self.ground_truth_len:], self.ground_truth_len)
+
+        if not terminal:
             if benchmark:
                 torch.cuda.synchronize()
                 t4 = time.time()
@@ -214,7 +233,6 @@ class GreedySTree(Tree):
                 return self.tokens[:accept_length+1], accept_length, accept_length, t2 - t1, t3-t2, t4 - t3, terminal
             self.prepare_for_next_iter(accept_list, self.tokens[:accept_length+1])
             return self.tokens[:accept_length+1], accept_length, accept_length, terminal
-            
         else:
              if benchmark:
                 torch.cuda.synchronize()
@@ -249,8 +267,6 @@ class GreedySTree(Tree):
         self.num_nodes = len(valid_tokens)
 
         total_nodes = len(valid_tokens) + self.tree_size - 1
-        
-
         self.attn_mask = self.full_attn_mask[self.max_length - total_nodes: 2 * self.max_length - total_nodes, self.max_length - total_nodes: 2 * self.max_length - total_nodes]
 
         
@@ -262,14 +278,16 @@ class GreedySTree(Tree):
         self.draft_logits[0] = draft_model_outputs[...,-1,:][0]
         self.draft_kv_len = self.num_nodes
         self.target_kv_len = len(accept_list)
-    
+        
 
-class GreedySTreeTest(Tree):
+
+        
+
+
+class SpecTreeTest(Tree):
     def __init__(self, 
-                 #  draft_model_engine :LLM_Pipeline,
-                #  target_model_engine :LLM_Pipeline,
-                 draft_model_engine,
-                 target_model_engine,
+                 draft_model_engine :LLM_Pipeline,
+                 target_model_engine :LLM_Pipeline,
                  prefix :torch.LongTensor,
                  temperature :float = 0.6,
                  top_p: float = 0.9,
@@ -278,25 +296,25 @@ class GreedySTreeTest(Tree):
                  max_length = 256,
                  max_width = 32,
                  device :str = 'cpu',
-                 grow_map = None,
                  attn_mask = None, 
                  sequence = None, 
                  new_tokens_buffer = None, 
                  parents_buffer = None, 
                  position_ids = None) -> None:
+        
         super().__init__(device=device, max_length=max_length)
         assert self.max_length == draft_model_engine.max_length
+        self.max_width = max_width
         self.draft_model_engine = draft_model_engine
         self.target_model_engine = target_model_engine
         self.temperature = temperature
         self.top_p = top_p
-        self.grow_map = grow_map
-        self.max_width = max_width
+        
         self.initialize(attn_mask, sequence, new_tokens_buffer, parents_buffer, position_ids, None)
         self.set_prefix(prefix=prefix)
-
         self.Successors = [list(range(1, self.max_width + 1))]
         self.Successors.extend([[] for _ in range(self.max_width)])
+
         self.attn_mask = self.full_attn_mask[:self.max_length, :self.max_length]
         for idx in range(self.max_width):
              self.attn_mask[idx + self.num_nodes] = self.attn_mask[self.num_nodes - 1]
@@ -304,7 +322,7 @@ class GreedySTreeTest(Tree):
         
         self.position_ids[self.num_nodes : self.num_nodes + self.max_width] = self.position_ids[self.num_nodes - 1] + 1
         self.ground_truth_len = len(prefix)
-        
+        self.r = torch.rand(len(position_ids)).to(self.device)
         self.storage_ids = torch.arange(self.max_length).to(self.device)
         
         
@@ -324,24 +342,28 @@ class GreedySTreeTest(Tree):
         self.draft_kv_len = self.num_nodes
         
         self.target_kv_len = target_kv_len
-
-        self.target_token = None
+        self.rand = torch.empty((self.max_width + 1, self.draft_logits.shape[1])).uniform_().to(self.device)
         self.collective_grow_static([0], [self.max_width])
-
+    
     @torch.inference_mode()
-    def collective_grow_static(self, idx_list :list[int], n_branch_list :list[int], benchmark=False):
-        
+    def collective_grow_static(self, idx_list :torch.LongTensor, n_branch_list :list[int], benchmark=False):
         
         
         assert len(set(idx_list)) == len(idx_list)
         assert len(self.draft_logits) == (self.num_nodes - self.ground_truth_len + 1)
         
-    
         total_branch = sum(n_branch_list)
         max_branch = max(n_branch_list)
         sampling_logits = self.draft_logits[idx_list]
+        
+        sampling_q = softmax(sampling_logits / self.temperature, dim=-1)
+        
             
-        new_tokens_set  = sampling_logits.topk(k=max_branch).indices
+            
+        new_tokens_set  = (self.rand[idx_list].log()/sampling_q).topk(k=max_branch).indices
+        
+            
+        
         finished_tokens = 0
             
         for i, idx in enumerate(idx_list):
@@ -374,58 +396,56 @@ class GreedySTreeTest(Tree):
     @torch.inference_mode()
     def accept_step(self, parent_id :int) ->ChildrenAccept:
         logits_id = parent_id - (self.ground_truth_len - 1)
+        p = self.target_logits[logits_id]
         
-        target_token = self.target_token[logits_id]
+        draft_logits = self.draft_logits[logits_id]
         children = self.Successors[logits_id]
         if len(children) == 0:
-            return ChildrenAccept(accept_mark=2)
+            return ChildrenAccept(accept_mark=2, residual=p)
         
         for idx, pos in enumerate(children):
 
             token = self.tokens[pos + (self.ground_truth_len - 1)]
-            if token == target_token:
+            q = softmax(draft_logits / self.temperature, dim=-1)
+            r = self.r[pos + (self.ground_truth_len - 1)]
+            if p[token] >= r * q[token]:
                 return ChildrenAccept(accept_mark=0, token=token, position=pos + (self.ground_truth_len - 1), successor_order=idx)
+            else:
+                p = get_residual(p, q)
+                draft_logits[token] = -torch.inf
         
-        return ChildrenAccept(accept_mark=1)
+        return ChildrenAccept(accept_mark=1, residual=p)
 
 
         
     @torch.inference_mode()
-    def verify(self):
+    def verify(self, benchmark = False):
         new_node_num = (self.num_nodes - self.ground_truth_len + 1)
         if self.target_kv_len == 0:
             start_pos = 0
             end_pos = self.num_nodes
-            attn_mask = self.attn_mask[start_pos: end_pos]
+            attn_mask = self.attn_mask[start_pos: end_pos, :end_pos]
             attn_mask = attn_mask[None, None, :, :].type(self.target_model_engine.dtype)
-            
             target_model_outputs = self.target_model_engine.forward(input_ids = self.tokens[start_pos : end_pos].unsqueeze(0), 
                                     position_ids = self.position_ids[start_pos : end_pos].unsqueeze(0), attention_mask = attn_mask, 
                                     storage_ids=self.storage_ids[start_pos : end_pos])
-            
             self.target_logits :torch.FloatTensor= target_model_outputs[0][self.ground_truth_len - 1:]
-            
             
         else:
             start_pos = self.target_kv_len
             end_pos = self.num_nodes
-            attn_mask = self.attn_mask[start_pos: end_pos]
+            attn_mask = self.attn_mask[start_pos: end_pos, :end_pos]
             attn_mask = attn_mask[None, None, :, :].type(self.target_model_engine.dtype)
-            
             target_model_outputs = self.target_model_engine.forward(input_ids = self.tokens[start_pos : end_pos].unsqueeze(0), 
                                         position_ids =self.position_ids[start_pos : end_pos].unsqueeze(0), attention_mask = attn_mask,
                                         storage_ids=self.storage_ids[start_pos : end_pos])
-            
             
             self.target_logits :torch.FloatTensor = target_model_outputs[0][-(new_node_num):]
         
         assert len(self.draft_logits) == (self.num_nodes - self.ground_truth_len + 1)
         assert len(self.target_logits) == (self.num_nodes - self.ground_truth_len + 1)
-        
         self.target_logits = get_sampling_logits(logits=self.target_logits, top_p=self.top_p, T=self.temperature, replicate=False)
         self.target_logits = softmax(self.target_logits / self.temperature, dim=-1)
-        self.target_token = self.target_logits.multinomial(num_samples=1)
-        
         accept_list = list(range(self.ground_truth_len))
         b = -1
         terminal = False
@@ -439,10 +459,17 @@ class GreedySTreeTest(Tree):
                      terminal = True
                      break
             else:
+                residual = children_accept.residual
                 break
+        if not terminal:
+            if torch.isnan(residual).any():
+                 terminal = True
+            else:
+                last_token = residual.multinomial(num_samples=1, replacement=True)
+
+        
         accept_tokens = self.tokens[accept_list]
         if not terminal:
-            last_token = self.target_token[accept_list[-1] - self.ground_truth_len + 1].reshape(1)
             valid_tokens = torch.cat([accept_tokens, last_token], dim=-1)
             
             self.draft_model_engine.gather_kv(accept_list)
@@ -451,8 +478,11 @@ class GreedySTreeTest(Tree):
             return valid_tokens, len(accept_list), len(accept_list), b, terminal
         else:
             return accept_tokens, len(accept_list), len(accept_list), b, terminal
-       
-        
     
     def verbose(self):
         super().verbose()
+
+    
+    
+
+                

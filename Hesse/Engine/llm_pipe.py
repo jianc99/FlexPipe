@@ -183,15 +183,21 @@ class KV_Cache:
 
         self.kv_offset = len(indices)
     
-    def gather_kv_incremental(self, indices: list[int], offset:int):
+    def gather_kv_incremental(self, indices: list[int], offset:int, batch_idx=None):
+        if batch_idx == None:
+            self.k_cache[..., offset:offset + len(indices), :] = self.k_cache[..., indices, :]
+            self.v_cache[..., offset:offset + len(indices), :] = self.v_cache[..., indices, :]
 
-        self.k_cache[..., offset:offset + len(indices), :] = self.k_cache[..., indices, :]
-        self.v_cache[..., offset:offset + len(indices), :] = self.v_cache[..., indices, :]
+            self.k_cache[..., offset + len(indices):, :] = 0.0
+            self.v_cache[..., offset + len(indices):, :] = 0.0
+        else:
+            self.k_cache[:, batch_idx, :, offset:offset + len(indices), :] = self.k_cache[:, batch_idx, :, indices, :]
+            self.v_cache[:, batch_idx, :, offset:offset + len(indices), :] = self.v_cache[:, batch_idx, :, indices, :]
 
-        self.k_cache[..., offset + len(indices):, :] = 0.0
-        self.v_cache[..., offset + len(indices):, :] = 0.0
+            self.k_cache[:, batch_idx, :, offset + len(indices):, :] = 0.0
+            self.v_cache[:, batch_idx, :, offset + len(indices):, :] = 0.0
 
-        self.kv_offset = offset + len(indices)
+        # self.kv_offset = offset + len(indices)
 
 
     
@@ -537,7 +543,7 @@ def capture_graph(
     static_position_ids = torch.full((bsz, decoding_seqlen), 0, dtype=torch.long, device=device)
     static_storage_ids = torch.arange(decoding_seqlen, dtype=torch.long, device=device)
     static_attn_mask = torch.full((decoding_seqlen, llm.max_length), 0, dtype=dtype, device=device)
-    static_attn_mask = static_attn_mask[None, None, :, :]
+    static_attn_mask = static_attn_mask[None, None, :, :].repeat(bsz,1,1,1)
     static_hidden_state = torch.full((bsz, decoding_seqlen, hidden_dim), 0, dtype=dtype, device=device)
     if not is_first_stage: 
         static_input_ids = static_hidden_state

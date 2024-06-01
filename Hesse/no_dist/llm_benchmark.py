@@ -17,10 +17,10 @@ def _make_causal_mask(
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', type=str, default="meta-llama/Llama-2-7b-hf",help='model')
 parser.add_argument('--T', type=int, default=2000, help='repeat times')
-parser.add_argument('--B', type=int, default=16, help='batch size')
+parser.add_argument('--B', type=int, default=20, help='batch size')
 parser.add_argument('--P', type=int, default=128, help='prefix length')
-parser.add_argument('--M', type=int, default=256, help='max length')
-parser.add_argument('--D', type=int, default=128, help='dec length')
+parser.add_argument('--M', type=int, default=288, help='max length')
+parser.add_argument('--D', type=int, default=32, help='dec length')
 args = parser.parse_args()
 print(args)
 PREFIX_LEN = args.P
@@ -38,13 +38,13 @@ input_ids = torch.randint(low=3, high=30000, size=(1, PREFIX_LEN), device=DEVICE
 attention_mask = _make_causal_mask((MAX_LEN, MAX_LEN), dtype=DTYPE, device=DEVICE)
 attention_mask = attention_mask[None, None, :, :]
 position_ids = torch.arange(PREFIX_LEN, device=DEVICE).repeat(BATCH_SIZE, 1)
-prefix_storage_ids = torch.arange(PREFIX_LEN, device=DEVICE).repeat(BATCH_SIZE, 1)
+prefix_storage_ids = torch.arange(PREFIX_LEN, device=DEVICE)
 llm.initialize_cuda_graph([DEC_LEN, PREFIX_LEN])
 llm.forward(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask[..., :PREFIX_LEN,:], storage_ids=prefix_storage_ids)
 
 input_ids = torch.randint(low=3, high=30000, size=(1, DEC_LEN), device=DEVICE)
-storage_ids = torch.arange(DEC_LEN, device=DEVICE).repeat(BATCH_SIZE, 1) + PREFIX_LEN
-position_ids = storage_ids.clone()
+storage_ids = torch.arange(DEC_LEN, device=DEVICE) + PREFIX_LEN
+position_ids = storage_ids.clone().repeat(BATCH_SIZE, 1)
 attention_mask = attention_mask[..., PREFIX_LEN: PREFIX_LEN + DEC_LEN,:].clone()
 for _ in range(WARM_UP):
     llm.forward(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask, storage_ids=storage_ids)

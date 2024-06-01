@@ -176,15 +176,15 @@ class KV_Cache:
 
         self.kv_offset = len(indices)
     
-    def gather_kv_incremental(self, indices: list[int], offset:int):
+    def gather_kv_incremental(self, indices: list[int], offset:int, batch_idx):
+        
+        self.k_cache[:, batch_idx, :, offset:offset + len(indices), :] = self.k_cache[:, batch_idx, :, indices, :]
+        self.v_cache[:, batch_idx, :, offset:offset + len(indices), :] = self.v_cache[:, batch_idx, :, indices, :]
 
-        self.k_cache[..., offset:offset + len(indices), :] = self.k_cache[..., indices, :]
-        self.v_cache[..., offset:offset + len(indices), :] = self.v_cache[..., indices, :]
+        self.k_cache[:, batch_idx, :, offset + len(indices):, :] = 0.0
+        self.v_cache[:, batch_idx, :, offset + len(indices):, :] = 0.0
 
-        self.k_cache[..., offset + len(indices):, :] = 0.0
-        self.v_cache[..., offset + len(indices):, :] = 0.0
-
-        self.kv_offset = offset + len(indices)
+        # self.kv_offset = offset + len(indices)
     
     def gather_kv_incremental_batch(self, indices: list[list[int]], offset:list[int]):
 
@@ -434,18 +434,15 @@ class LLM:
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, self.cos_cache, self.sin_cache, position_ids)
         key_states, value_states = self.kv_cache.update_kv_cache(key_states, value_states, layer_idx, storage_ids)
 
-        query_states = query_states.reshape(self.batch_size, self.num_key_value_heads, q_len * self.num_key_value_groups, self.head_dim)
+        key_states = repeat_kv(key_states, self.num_key_value_groups)
+        value_states = repeat_kv(value_states, self.num_key_value_groups)
         
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
-
-        attention_mask = attention_mask.repeat(1, 1, self.num_key_value_groups, 1)
-        
         attn_weights = attn_weights + attention_mask
         
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
         hidden_states = torch.matmul(attn_weights, value_states)
         
-        hidden_states = hidden_states.reshape(bsz, self.num_heads, q_len, -1)
         hidden_states = hidden_states.transpose(1, 2).contiguous()
         hidden_states = hidden_states.reshape(bsz, q_len, self.hidden_size)
         
@@ -472,7 +469,7 @@ class LLM:
         hidden_states = F.embedding(input_ids, self.embed_tokens)
        
         for idx in range(self.num_layers):
-                hidden_states = self.layer_compute(self.layers[idx], idx, hidden_states, position_ids, attention_mask, storage_ids)
+            hidden_states = self.layer_compute(self.layers[idx], idx, hidden_states, position_ids, attention_mask, storage_ids)
         
         input_dtype = hidden_states.dtype
         hidden_states = hidden_states.to(torch.float32)
@@ -491,9 +488,9 @@ def capture_graph(
     bsz = llm.batch_size
     static_input_ids = torch.full((bsz, decoding_seqlen), 0, dtype=torch.long, device=device)
     static_position_ids = torch.full((bsz, decoding_seqlen), 0, dtype=torch.long, device=device)
-    static_storage_ids = torch.arange(decoding_seqlen, dtype=torch.long, device=device).repeat(bsz, 1)
+    static_storage_ids = torch.arange(decoding_seqlen, dtype=torch.long, device=device)
     static_attn_mask = torch.full((decoding_seqlen, llm.max_length), 0, dtype=dtype, device=device)
-    static_attn_mask = static_attn_mask[None, None, :, :]
+    static_attn_mask = static_attn_mask[None, None, :, :].repeat(bsz,1,1,1)
     s = torch.cuda.Stream()
     s.wait_stream(torch.cuda.current_stream())
     with torch.cuda.stream(s):
@@ -547,6 +544,8 @@ class LLMEngine:
         gc.collect()
         self.mempool = torch.cuda.graphs.graph_pool_handle()
         for decoding_seqlen in decoding_seqlens:
+            if decoding_seqlen == 0:
+                continue
             if decoding_seqlen not in self.callables:
                 self.callables[decoding_seqlen] = capture_graph(
                     llm=self.llm,
@@ -574,5 +573,5 @@ class LLMEngine:
         self.llm.kv_cache.gather_kv(indices)
     def clear_kv(self):
         self.llm.kv_cache.clear()
-    def gather_kv_incremental(self, indices: list[int], offset:int):
-        self.llm.kv_cache.gather_kv_incremental(indices, offset)
+    def gather_kv_incremental(self, indices: list[int], offset:int, batch_idx):
+        self.llm.kv_cache.gather_kv_incremental(indices, offset, batch_idx)

@@ -75,7 +75,11 @@ def make_tree_attention_mask(
 def get_sampling_logits(logits :torch.Tensor, top_p:float, T: float, replicate = False):
     if replicate:
         logits = logits.clone()
+    shape = logits.shape
     if top_p < 1.0:
+                if len(shape)==3:
+                    batch_size, seq_len, voc_size = logits.size()
+                    logits = logits.reshape(-1, voc_size)
                 sorted_logits, sorted_indices = torch.sort(logits, descending=True)
                 cumulative_probs = torch.cumsum(
                 torch.nn.functional.softmax(sorted_logits / T, dim=-1), dim=-1)
@@ -84,6 +88,8 @@ def get_sampling_logits(logits :torch.Tensor, top_p:float, T: float, replicate =
                 filter[..., 0] = 0
                 indices_to_remove = filter.scatter(-1, sorted_indices, filter)
                 logits[indices_to_remove] = float('-inf')
+                if len(shape)==3:
+                    logits = logits.reshape(batch_size, seq_len, voc_size)
     return logits
 
 def select_kv(kv_cache: tuple[list[torch.FloatTensor]], indices: list[int]):

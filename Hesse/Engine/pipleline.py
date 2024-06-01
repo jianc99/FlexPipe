@@ -83,10 +83,10 @@ class LLM_Pipeline:
         dist.broadcast(output,self.group_indices[-1][0])
         return output
     
-    def gather_kv_incremental(self, indices: list[int], offset:int):
+    def gather_kv_incremental(self, indices: list[int], offset:int, batch_idx=None):
         if self.pp_config == None:
             return
-        self.pp_engine.llm.kv_cache.gather_kv_incremental(indices, offset)
+        self.pp_engine.llm.kv_cache.gather_kv_incremental(indices, offset, batch_idx)
     
     def clear_kv(self):
         if self.pp_config == None:

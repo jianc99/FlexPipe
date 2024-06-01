@@ -56,25 +56,23 @@ class BatchTree:
     def __init__(self, device :str = 'cpu', max_length = 512, dtype = torch.float16, batch_size = 1) -> None:
         self.tokens = torch.zeros(batch_size, max_length, device=device).long()
         self.Successors :list[list[int]] = []
-        self.num_nodes = torch.zeros(batch_size)
+        self.num_nodes = torch.zeros(batch_size,device=device).long()
         self.device = device
         self.max_length = max_length
         self.dtype = dtype
         self.batch_size = batch_size
 
 
-    def initialize(self, attn_mask, position_ids, active_mark):
-        self.full_attn_mask = attn_mask
-        self.position_ids = position_ids
+    def initialize(self, active_mark):
+        self.position_ids = torch.zeros(self.batch_size,self.max_length).long().to(self.device)
         self.active_mark = active_mark
-        self.full_attn_mask = self.full_attn_mask.repeat(2, 2)
 
     def set_prefix(self, prefix: torch.LongTensor):
         self.tokens[:,:prefix.size(1)] = prefix.to(self.device)
-        self.position_ids[:,:prefix.size(1)] = torch.arange(len(prefix)).repeat(self.batch_size,1)
+        self.position_ids[:,:prefix.size(1)] = torch.arange(prefix.size(1)).repeat(self.batch_size,1)
         
         self.num_nodes += prefix.size(1)
-        self.full_attn_mask[:self.max_length, :self.max_length] = _make_causal_mask((1, self.max_length),dtype=self.dtype, device=self.device)
+        self.full_attn_mask = _make_causal_mask((1, self.max_length),dtype=self.dtype, device=self.device)
 
         
         

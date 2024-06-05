@@ -80,6 +80,7 @@ def simulation_greedy(target_model : LLM_Pipeline, draft_model: LLM_Pipeline, da
             target_model.clear_kv()
             if num_large_model_steps > 0 and GLOBAL_RANK == 0:
                 print(num_decoding_steps / num_large_model_steps)
+                print(branch_prob)
     if GLOBAL_RANK==0:
         print("total decoding steps: {}".format(num_decoding_steps), "large model steps: {}".format(num_large_model_steps), "avg decoding step: {}".format(num_decoding_steps / num_large_model_steps))
         branch_prob = branch_prob / branch_prob.sum(dim=-1) 

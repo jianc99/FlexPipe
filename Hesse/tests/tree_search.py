@@ -11,7 +11,8 @@ args = parser.parse_args()
 print(args)
 with open(args.config, 'r') as f:
     config = json.load(f)
-p = torch.load(config["acceptance_rate_vector"]).cpu()[:-1]
+p = torch.load(config["acceptance_rate_vector"]).cpu()
+p[0]=0.0
 max_branch = p.shape[0] - 1
 
 max_depth = config["max_depth"]
@@ -67,7 +68,8 @@ for i, b in enumerate(valid_budget):
     for d, ac_len in enumerate(results[b]):
         if ac_len < 0:
             continue
-        x = ((d) * draft_inference_time + target_time) / ac_len
+        # x = max((d) * draft_inference_time , target_time) / ac_len
+        x = (d) * draft_inference_time + target_time / ac_len
         if x < dec_time:
             dec_time = x
             pairs = (b,d)

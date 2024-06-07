@@ -42,6 +42,7 @@ args = parser.parse_args()
 # time.sleep(1000)
 setup_seed(args.seed)
 target_pp_config, draft_pp_config = initialized_dist_pipe(args)
+# dist.barrier()
 # print(target_pp_config,draft_pp_config)
 global_rank=dist.get_rank()
 BATCH_SIZE = args.B
@@ -66,12 +67,12 @@ def simulation_fast(draft_model: LLM_Pipeline, dataloader: DataLoader, max_lengt
             batch_tree_2 = PipeTree_Draft(draft_model_engine=draft_model, prefix=mini_batch_2, max_length=max_length, device=DEVICE, batch_size=BATCH_SIZE//2, grow_map=grow_map, sampling_callables=sampling_callables, sample_gather_indices= sample_gather_indices, target_rank0=target_rank0, draft_rank0=draft_rank0, idx=1)
             num_nodes = torch.zeros(BATCH_SIZE,device=DEVICE).long()
             
-            torch.cuda.synchronize()
-            t1 = time.time()
             batch_tree_1.construct_grow_map()
             batch_tree_1.request_target()
             batch_tree_2.construct_grow_map()
             longest=128
+            torch.cuda.synchronize()
+            t1 = time.time()
             while longest < 256 and terminate == False:
                 batch_tree_1.receive_result()
                 num_large_model_steps+=1
@@ -117,16 +118,18 @@ def simulation_fast(draft_model: LLM_Pipeline, dataloader: DataLoader, max_lengt
 
 if target_pp_config!=None:
     # time.sleep(100)
-    dist.barrier()
+    # dist.barrier()
     path = args.growmap
     grow_map = torch.load(path)
     tree_size = grow_map["size"]
     MAX_LEN = args.M + tree_size
     TARGET_MODEL_NAME = args.target
     DTYPE = torch.float16
-    DEVICE = torch.device("cuda", global_rank)
+    # DEVICE = torch.device("cuda", global_rank)
+    DEVICE = torch.device("cuda", 0)
     cg_list_target = [tree_size]
     target_model = LLM_Pipeline(max_length=MAX_LEN, model_name=TARGET_MODEL_NAME, device=DEVICE, batch_size=BATCH_SIZE//2, dtype=torch.float16, pp_config=target_pp_config, cg_list=cg_list_target)
+    dist.barrier()
     target_rank0 = args.target_group[0]
     draft_rank0 = args.draft_group[0]
     mini_batch_1_tree = None
@@ -155,6 +158,7 @@ if target_pp_config!=None:
                 mini_batch_2_tree = None
                 dist.barrier()
 elif draft_pp_config!=None:
+    dist.barrier()
     tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf", use_fast=False)
     tokenizer.pad_token = tokenizer.eos_token
     if args.dataset == 'wiki':
@@ -176,7 +180,8 @@ elif draft_pp_config!=None:
     MAX_LEN = args.M + tree_size
     DRAFT_MODEL_NAME = args.model
     DTYPE = torch.float16
-    DEVICE = torch.device("cuda", global_rank)
+    # DEVICE = torch.device("cuda", global_rank)
+    DEVICE = torch.device("cuda", 0)
 
     sampling_callables = {}
     sample_gather_indices = {}
@@ -202,7 +207,6 @@ elif draft_pp_config!=None:
     draft_rank0 = args.draft_group[0]
 
     draft_model =  LLM_Pipeline(max_length=MAX_LEN, model_name=DRAFT_MODEL_NAME, device=DEVICE, batch_size=BATCH_SIZE//2, dtype=torch.float16, pp_config=draft_pp_config, cg_list=cg_list_draft)
-    dist.barrier()
     if args.Mode == "fast":
         simulation_fast(draft_model=draft_model, dataloader=dataloader, max_length=MAX_LEN, grow_map = grow_map, sampling_callables=sampling_callables, sample_gather_indices = sample_gather_indices, target_rank0 = target_rank0, draft_rank0 = draft_rank0)
 

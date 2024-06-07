@@ -178,8 +178,8 @@ def initialized_dist_spec(args):
 def initialized_dist_pipe(args):
     dist.init_process_group(backend='nccl')
     global_rank=dist.get_rank()
-    # torch.cuda.set_device(0)
-    torch.cuda.set_device(global_rank)
+    torch.cuda.set_device(0)
+    # torch.cuda.set_device(global_rank)
 
     target_pp_config=None
     draft_pp_config=None
@@ -187,9 +187,11 @@ def initialized_dist_pipe(args):
     target_layer_partition = args.target_layer_partition
     target_tp_groups = args.target_tp_groups
     target_group = args.target_group
+    # target_group = [0,1]
     draft_layer_partition = args.draft_layer_partition
     draft_tp_groups = args.draft_tp_groups
     draft_group = args.draft_group
+    # draft_group = [2,3]
 
     target_tp_rank_groups = gen_tp_rank_groups(target_tp_groups,target_group)
     draft_tp_rank_groups = gen_tp_rank_groups(draft_tp_groups, draft_group)

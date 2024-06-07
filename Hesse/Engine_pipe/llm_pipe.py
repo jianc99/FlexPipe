@@ -387,7 +387,7 @@ class LLM:
                     gc.collect()
                     
                 self.num_layers = len(self.layers)
-                dist.barrier(self.global_group) 
+            # dist.barrier(self.global_group) 
 
     # @torch.inference_mode()
     # def initialize_cuda_graph(self, 

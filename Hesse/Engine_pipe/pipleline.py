@@ -28,7 +28,7 @@ class LLM_Pipeline:
         # dist.barrier(self.global_group)
         self.hidden_dim = self.pp_engine.llm.hidden_size
         self.pp_engine.initialize_cuda_graph(cg_list)
-        dist.barrier()
+        # dist.barrier()
 
 
     def forward(self,input_ids, position_ids, attention_mask, storage_ids):
